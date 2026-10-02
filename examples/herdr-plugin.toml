@@ -1,0 +1,5 @@
+[[keys.command]]
+key = "prefix+m"
+type = "plugin_action"
+command = "hopr.move"
+description = "Move agent to another Mac"
