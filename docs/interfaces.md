@@ -40,6 +40,16 @@ The manifest uses argv commands and has no startup/event hooks or build commands
 
 Installed version/help and authentication commands were inspected for Codex 0.160.0 and Claude Code 2.1.287. The initial adapters pin those versions. Idle double Ctrl+C is the graceful exit mechanism; process cessation and writer checks are still required afterward. Documentation: [Codex developer commands](https://learn.chatgpt.com/docs/developer-commands?surface=cli), [Claude interactive mode](https://code.claude.com/docs/en/interactive-mode), and [Claude CLI reference](https://code.claude.com/docs/en/cli-reference).
 
+Claude authentication under Herdr is checked through protocol 22
+`workspace.create` and `layout.apply` with a command argument array. A one-shot
+`hopr auth-probe` process calls the native authentication command in Herdr's launch
+context. Private request/result files bind the check to a UUID and exact workspace;
+no terminal output is parsed and no native credentials leave the destination.
+Cleanup verifies the server incarnation, workspace identity, pane directories,
+and idle foreground processes before closing only that diagnostic workspace.
+The macOS SSH/Keychain difference is also reported in
+[Anthropic issue 76545](https://github.com/anthropics/claude-code/issues/76545).
+
 Resume argument arrays are `codex resume <UUID> --cd <target> --no-daemon` and `claude --resume <UUID>` with destination cwd. No prompt argument or Enter keystroke submits an instruction. Each Mac uses its own `codex login status` / `claude auth status --json` and credentials. Codex shared app-server mode is refused because a stopped terminal process does not prove the conversation writer stopped.
 
 Native JSONL is an internal, version-sensitive format, not a documented general migration API. Codex identity comes from the first `session_meta.payload.id`; Claude uses `sessionId`. Structural cwd fields are remapped; historical message/tool text is retained verbatim as JSON values. Import only allows equal/prefix-compatible history. Native process resume against imported files still requires the real-device verification listed separately. Version pins do not substitute for that validation.

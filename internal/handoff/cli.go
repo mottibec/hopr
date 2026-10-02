@@ -45,7 +45,7 @@ func ExitCode(err error) int {
 		return 2
 	case "unsupported", "dependency", "authentication", "secrets", "action_required":
 		return 3
-	case "busy", "conflict", "invalid_package":
+	case "busy", "conflict", "invalid_package", "launch_rejected":
 		return 4
 	case "uncertain":
 		return 5
@@ -90,6 +90,12 @@ func Main(ctx context.Context, args []string, in io.Reader, out, errout io.Write
 	if rest[0] == "setup" {
 		result, err := setup(Expand(configPath), rest[1:], errout)
 		return printOutput(out, jsonOutput, result, err)
+	}
+	if rest[0] == "auth-probe" {
+		if len(rest) != 2 {
+			return printOutput(out, true, nil, fail("usage", "auth-probe requires a private request file"))
+		}
+		return printOutput(out, true, nil, runAuthProbe(ctx, rest[1]))
 	}
 	if rest[0] == "menu" {
 		in = bufio.NewReader(in)
@@ -347,15 +353,24 @@ func (e *Engine) Status(ctx context.Context, id string) (any, error) {
 	return result, nil
 }
 func authReady(ctx context.Context, c Config, agent string) error {
+	if agent == "claude" && c.Backend == "herdr" {
+		return (&Herdr{Config: c}).authReady(ctx, agent)
+	}
+	return authReadyDirect(ctx, c, agent)
+}
+func authReadyDirect(ctx context.Context, c Config, agent string) error {
 	if agent == "codex" {
 		if _, e := run(ctx, "", agentEnv(c), nil, c.Executables.Codex, "login", "status"); e != nil {
 			return fail("authentication", "Codex login is not ready")
 		}
 		return nil
 	}
+	if agent != "claude" {
+		return fail("unsupported", "unknown authentication adapter %s", agent)
+	}
 	b, e := run(ctx, "", agentEnv(c), nil, c.Executables.Claude, "auth", "status", "--json")
 	if e != nil {
-		return e
+		return fail("authentication", "Claude login is not available in this launch environment; run Claude auth status there")
 	}
 	var a struct {
 		LoggedIn bool `json:"loggedIn"`

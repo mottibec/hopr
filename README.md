@@ -47,7 +47,7 @@ Without `--project`/`--path`, setup creates a starter config; add project mappin
 
 `--config PATH` or `HOPR_CONFIG` selects a local configuration. The receiver reads its **own** configuration and credentials; the source cannot supply a remote configuration path.
 
-Initial built-in compatibility is deliberately narrow: **Codex 0.160.0, Claude Code 2.1.287, Herdr protocol 22 (verified with 0.9.0/0.9.1), tmux 3.7b**. Unknown versions fail before stopping a source. Codex must be launched with `--no-daemon`, because exiting a TUI connected to a shared app-server does not establish that its session is stopped.
+Initial built-in compatibility is deliberately narrow: **Codex 0.160.0, Claude Code 2.1.287, Herdr 0.9.0/0.9.1 (protocol 22), tmux 3.7b**. Unknown versions fail before stopping a source. Codex must be launched with `--no-daemon`, because exiting a TUI connected to a shared app-server does not establish that its session is stopped.
 
 ## First move
 

@@ -63,6 +63,9 @@ type apiResult struct {
 		ID    string `json:"workspace_id"`
 		Label string `json:"label"`
 	} `json:"workspaces"`
+	Workspace struct {
+		ID string `json:"workspace_id"`
+	} `json:"workspace"`
 }
 
 func (h *Herdr) call(ctx context.Context, server, method string, params any) (apiResult, error) {
@@ -76,7 +79,11 @@ func (h *Herdr) call(ctx context.Context, server, method string, params any) (ap
 		return result, fail("dependency", "Herdr socket %s: %v", socket, err)
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(time.Duration(h.Config.TimeoutSeconds) * time.Second))
+	deadline := time.Now().Add(time.Duration(h.Config.TimeoutSeconds) * time.Second)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	conn.SetDeadline(deadline)
 	id := UUID()
 	if err = json.NewEncoder(conn).Encode(map[string]any{"id": id, "method": method, "params": params}); err != nil {
 		return result, err
@@ -93,6 +100,11 @@ func (h *Herdr) call(ctx context.Context, server, method string, params any) (ap
 		return result, fail("uncertain", "Herdr response ID mismatch")
 	}
 	if response.Error != nil {
+		// Verified in Herdr 0.9.0/0.9.1: this rejection occurs before
+		// begin_managed_agent or any terminal input is sent.
+		if method == "agent.start" && response.Error.Code == "agent_pane_busy" {
+			return result, fail("launch_rejected", "Herdr rejected launch before sending input: %s", response.Error.Message)
+		}
 		return result, fail("dependency", "Herdr %s: %s", method, response.Error.Message)
 	}
 	return response.Result, nil
@@ -109,9 +121,6 @@ func (h *Herdr) token(server string) (string, error) {
 	return fmt.Sprintf("%s:%d:%d", h.Config.Servers[server], st.Dev, st.Ino), nil
 }
 func (h *Herdr) Preflight(ctx context.Context, s Session, target bool) error {
-	if err := commonPreflight(ctx, h.Config, s, target); err != nil {
-		return err
-	}
 	server := s.Server
 	if target {
 		server = h.Config.DefaultServer
@@ -122,6 +131,9 @@ func (h *Herdr) Preflight(ctx context.Context, s Session, target bool) error {
 	}
 	if r.Protocol != 22 {
 		return fail("unsupported", "Herdr protocol %d is unsupported; verified protocol is 22", r.Protocol)
+	}
+	if r.Version != "0.9.0" && r.Version != "0.9.1" {
+		return fail("unsupported", "Herdr %s is unsupported; verified versions are 0.9.0 and 0.9.1", r.Version)
 	}
 	// Probe the installed client schema as well as the live server; updates can differ.
 	b, e := run(ctx, "", nil, nil, h.Config.Executables.Herdr, "api", "schema", "--json")
@@ -134,7 +146,10 @@ func (h *Herdr) Preflight(ctx context.Context, s Session, target bool) error {
 	if e = json.Unmarshal(b, &schema); e != nil || schema.Protocol != 22 {
 		return fail("unsupported", "Herdr client schema is not protocol 22")
 	}
-	return h.integrationReady(ctx, server, s.Agent)
+	if e = h.integrationReady(ctx, server, s.Agent); e != nil {
+		return e
+	}
+	return commonPreflight(ctx, h.Config, s, target)
 }
 func (h *Herdr) integrationReady(ctx context.Context, server, agent string) error {
 	r, err := h.call(ctx, server, "integration.list", map[string]any{})
@@ -363,12 +378,34 @@ func (h *Herdr) Launch(ctx context.Context, j Journal) error {
 	id, _ := hex.DecodeString(strings.ReplaceAll(j.ID, "-", ""))
 	// Keep all UUID bits within Herdr's 32-character agent-name limit.
 	name := "hopr-" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(id))
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(h.Config.TimeoutSeconds)*time.Second)
+	defer cancel()
+	for {
+		err := h.launchAttempt(ctx, j, name)
+		if err == nil || wrap(err).Code != "launch_rejected" {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+func (h *Herdr) launchAttempt(ctx context.Context, j Journal, name string) error {
 	token, e := h.token(h.Config.DefaultServer)
 	if e != nil {
 		return e
 	}
 	if token != j.TargetServerToken {
 		return fail("uncertain", "destination server incarnation changed")
+	}
+	p, e := h.call(ctx, h.Config.DefaultServer, "pane.get", map[string]any{"pane_id": j.TargetPane})
+	if e != nil {
+		return e
+	}
+	if p.Pane.Terminal != j.TargetTerminal || p.Pane.CWD != j.TargetPath || p.Pane.Agent != "" || p.Pane.Pending {
+		return fail("conflict", "destination pane changed or is already occupied; refusing launch")
 	}
 	r, e := h.call(ctx, h.Config.DefaultServer, "agent.start", map[string]any{"name": name, "kind": j.Source.Agent, "pane_id": j.TargetPane, "args": resumeArgs(j.Source, j.TargetPath), "timeout_ms": max(4000, h.Config.TimeoutSeconds*1000)})
 	if e != nil {
@@ -497,21 +534,8 @@ func commonPreflight(ctx context.Context, c Config, s Session, target bool) erro
 		return fail("unsupported", "custom agent keybindings prevent verified graceful exit")
 	}
 	if target {
-		if s.Agent == "codex" {
-			if _, e = run(ctx, "", agentEnv(c), nil, c.Executables.Codex, "login", "status"); e != nil {
-				return fail("authentication", "destination Codex login is not ready")
-			}
-		} else {
-			b, e := run(ctx, "", agentEnv(c), nil, c.Executables.Claude, "auth", "status", "--json")
-			if e != nil {
-				return e
-			}
-			var auth struct {
-				LoggedIn bool `json:"loggedIn"`
-			}
-			if json.Unmarshal(b, &auth) != nil || !auth.LoggedIn {
-				return fail("authentication", "destination Claude authentication is not ready")
-			}
+		if e = authReady(ctx, c, s.Agent); e != nil {
+			return e
 		}
 		if e = privateDir(c.WorkspaceRoot); e != nil {
 			return e

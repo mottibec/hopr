@@ -25,7 +25,17 @@ open. Do not delete native `thread-writer-locks` files to bypass a busy UUID.
 | `target_ready` | Exact destination conversation was confirmed idle and interactive. Completion journaling may remain. |
 | `complete` | Destination owns the managed session. Source may be powered off after the source also records completion. |
 
-`intent` records an action before its side effect. In particular, `create_workspace` is reconciled by the durable `hopr-<UUID>` label, and `launch` is reconciled by exact native readiness. **Hopr never sends another launch after launch intent exists**, even if a crash happened just before the first launch. A lost SSH response after a successful launch therefore cannot create a second agent.
+`intent` records an action before its side effect. In particular, `create_workspace` is reconciled by the durable `hopr-<UUID>` label, and `launch` is reconciled by exact native readiness. **Hopr never repeats a launch whose outcome is unknown**, even if a crash happened just before the first launch. A lost SSH response after a successful launch therefore cannot create a second agent.
+
+Herdr's structured `agent_pane_busy` rejection is a narrow exception: the verified
+0.9.0/0.9.1 implementations return it before sending any command. Hopr retries this
+rejection within the launch timeout, rechecking the server, pane, terminal and
+checkout identity. If the shell stays unavailable, `intent: launch_rejected`
+records the definite non-execution. Recovery may then launch into that same pane
+without recreating the checkout or repeating the import. Input failures, lost
+responses, other errors and a crash before recording the rejection remain
+uncertain and are not retried automatically. Command adapters must only report
+`launch_rejected` when they can make the same non-execution guarantee.
 
 If the destination shows a trust/authentication dialog, resolve it there without submitting a new instruction and recover. For tmux, also attest the actual resumed UUID at its idle prompt. If no matching workspace/process exists after uncertain creation/launch, this release stops for manual reconciliation; there is no force/replay/reset flag. Keep both journals and contact the adapter maintainer or inspect the recorded identities. Do not guess by launching the source.
 

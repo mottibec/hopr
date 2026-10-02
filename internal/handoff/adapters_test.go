@@ -15,6 +15,9 @@ import (
 func TestHerdrLaunchUsesValidUniqueAgentName(t *testing.T) {
 	names := map[string]bool{}
 	h, token := apiFixture(t, func(method string, raw json.RawMessage) any {
+		if method == "pane.get" {
+			return map[string]any{"pane": paneInfo{Terminal: "target"}}
+		}
 		if method != "agent.start" {
 			t.Errorf("unexpected %s", method)
 		}
@@ -33,6 +36,47 @@ func TestHerdrLaunchUsesValidUniqueAgentName(t *testing.T) {
 	})
 	for _, id := range []string{testID, "11111111-2222-4333-8444-555555555556"} {
 		must(t, h.Launch(context.Background(), Journal{ID: id, TargetServerToken: token, TargetTerminal: "target", TargetPane: "w2:p1", Source: Session{Agent: "codex", ID: testID}}))
+	}
+}
+
+func TestHerdrLaunchRetriesOnlyConfirmedBusyRejection(t *testing.T) {
+	for _, mode := range []string{"busy", "input-failed", "changed-pane", "changed-after-busy"} {
+		t.Run(mode, func(t *testing.T) {
+			calls := 0
+			h, token := apiFixture(t, func(method string, raw json.RawMessage) any {
+				if method == "pane.get" {
+					terminal := "target"
+					if mode == "changed-pane" || mode == "changed-after-busy" && calls == 1 {
+						terminal = "replaced"
+					}
+					return map[string]any{"pane": paneInfo{Terminal: terminal}}
+				}
+				if method != "agent.start" {
+					t.Errorf("unexpected %s", method)
+				}
+				calls++
+				if mode == "input-failed" {
+					return &Error{Code: "agent_start_input_failed", Message: "input outcome is not known"}
+				}
+				if calls == 1 {
+					return &Error{Code: "agent_pane_busy", Message: "shell is starting"}
+				}
+				return map[string]any{"agent": paneInfo{Terminal: "target"}}
+			})
+			err := h.Launch(context.Background(), Journal{ID: testID, TargetServerToken: token, TargetTerminal: "target", TargetPane: "w2:p1", Source: Session{Agent: "claude", ID: testID}})
+			if (err == nil) != (mode == "busy") {
+				t.Fatalf("mode=%s err=%v", mode, err)
+			}
+			want := 1
+			if mode == "busy" {
+				want = 2
+			} else if mode == "changed-pane" {
+				want = 0
+			}
+			if calls != want {
+				t.Fatalf("launch requests=%d; want %d", calls, want)
+			}
+		})
 	}
 }
 
@@ -101,7 +145,12 @@ func apiFixture(t *testing.T, result func(string, json.RawMessage) any) (*Herdr,
 				if json.NewDecoder(c).Decode(&req) != nil {
 					return
 				}
-				json.NewEncoder(c).Encode(map[string]any{"id": req.ID, "result": result(req.Method, req.Params)})
+				value := result(req.Method, req.Params)
+				if err, ok := value.(*Error); ok {
+					json.NewEncoder(c).Encode(map[string]any{"id": req.ID, "error": err})
+				} else {
+					json.NewEncoder(c).Encode(map[string]any{"id": req.ID, "result": value})
+				}
 			}()
 		}
 	}()

@@ -13,7 +13,7 @@ go vet ./...
 make build
 ```
 
-The full Go suite passed in 50.991 seconds; the race detector passed in 87.763 seconds after the concurrency and readiness fixes. `go vet ./...` and the ARM64 build passed. Fixtures use real temporary Git repositories and real native JSONL import/export; agent lifecycle and Herdr readiness are controlled adapters or a fake Unix socket. Covered behaviors include:
+The full Go suite passed in 61.847 seconds; the race detector passed in 96.768 seconds after the Claude launch-context authentication and rejected-launch recovery fixes. `go vet ./...` and the ARM64 build passed. Fixtures use real temporary Git repositories and real native JSONL import/export; agent lifecycle and Herdr readiness are controlled adapters or a fake Unix socket. Covered behaviors include:
 
 - Codex and Claude handoffs, compatible return trips, divergent/destination-ahead history rejection, differing home and project paths.
 - Exact HEAD/unpushed history, staged versus unstaged text and binaries, deletion, untracked files, explicit ignored files, modes, internal symlinks, linked worktrees and detached HEAD.
@@ -26,6 +26,8 @@ The full Go suite passed in 50.991 seconds; the race detector passed in 87.763 s
 - Scoped native writer locks: unrelated Codex processes stay running, the same UUID blocks, a writer arriving after preflight blocks import, and namespace coordination is honored.
 - Readiness before the first prompt: exact resume argv/cwd and a held native UUID lock; wrong/unlocked identities fail. Herdr names respect the length limit without truncating UUID identity.
 - Both journals retain destination ownership after recovery from a crash following launch.
+- Claude authentication in Herdr's launch context, failed/malformed login results, mismatched probe UUIDs, timeout, changed diagnostic workspaces, private-file checks and duplicate-probe refusal. Probe results exclude native authentication details.
+- Confirmed Herdr busy rejections can be retried; input failures and changed panes cannot. Recovery after a recorded rejection does not repeat checkout creation or import.
 
 These are simulated lifecycle integrations. They do not prove a real native agent will resume an imported conversation or exit reliably under every terminal configuration.
 
@@ -132,7 +134,7 @@ return trip with appended history, and disconnect injection around a real
 launch remain to be tested. Automated tests cover those state transitions with
 controlled agent lifecycle adapters.
 
-## Selected Claude test (pending authentication)
+## Selected native Claude handoff
 
 The user selected a disposable Claude test in `/Users/motti/hopr-test`, keeping
 the other source Claude/Codex sessions open. Herdr pane `w1H:p1`, native UUID
@@ -152,12 +154,58 @@ reported completing login. Both ordinary and TTY SSH checks gave that result.
 A Claude Keychain item exists, but a credential-access probe with its output
 discarded failed. Switching the probe to the GUI audit session with
 `launchctl asuser` was denied by macOS; that route was not pursued further.
-Local GUI authentication status is awaiting user verification.
+The user then confirmed `loggedIn: true` using that exact executable locally on
+Home. Unlocking the login Keychain in a separate SSH session did not make a fresh
+SSH authentication check pass. A disposable Herdr workspace running the same
+native check returned `loggedIn: true`, exit 0, with the expected Claude home.
+That diagnostic workspace (`w9`) was closed after the check. This isolated the
+failure to the authentication check's launch environment.
 
-The source is still running. Its journal is `prepared` / `prepare_remote`; no
-Claude source stop, export package, target checkout, import or launch occurred.
-Use **this same move ID** with `hopr recover` once destination authentication is
-available to the receiver. This is not a completed Claude acceptance test.
+After installing the launch-context fix on both Macs, Home's `hopr doctor --json`
+passed. The same move then stopped the selected source PID 68954, retired its pane,
+copied its checksum-verified package over SSH, restored Git, and imported the exact
+Claude conversation. No credentials were transferred.
+
+Herdr initially rejected `agent.start` because the new shell was not yet available.
+The exact rejection was verified against Herdr 0.9.1's implementation: no input had
+been sent. The old binary had discarded that distinction. After confirming the
+same destination terminal was an idle shell with no managed agent, its journal was
+backed up and reconciled once to `launch_rejected`. The new implementation persists
+and safely retries this specific rejection; regression tests cover the behavior.
+This run therefore does not prove an uninterrupted automatic handoff.
+
+The user accepted Claude's destination folder-trust prompt. Final verification:
+
+- Both journals are `complete`, with owner `private-mac`.
+- Destination pane `wD:p1`, terminal `term_65ce00af86b9711`, native PID 1322;
+  Herdr reports `herdr:claude`, exact UUID `fcfe3796-fbf1-4ec0-9133-1eee1c0356d7`,
+  `interactive_ready: true`, and `agent_status: idle`.
+- Checkout:
+  `/Users/mottibechhofer/HoprWorkspaces/hopr-test/0227b615-e7a6-4eeb-b9e9-c5983ef31a0a`.
+- Independent Git comparisons matched HEAD/ancestor commits, index entries,
+  staged/unstaged binary patches, status, file bytes, executable modes, symlink,
+  deletion and untracked file. HEAD is `da6e8dcbc6decb8475e14631ba877e01941504c3`.
+- The imported transcript remains an exact prefix of the native destination file;
+  its fixture marker `HOPR-CLAUDE-42`, session UUID and remapped cwd are present.
+  No instruction was submitted on resume.
+- Two additional recoveries kept the same native PID and terminal, with exactly
+  one move workspace and no remaining authentication diagnostic workspaces.
+- All four pre-existing destination Codex PIDs remained present. Seventeen of
+  eighteen unrelated source agent PIDs remained present in the post-check; Codex
+  PID 80636 was absent for an unestablished reason. Hopr sent exit input only to
+  the selected Claude pane, but this observation does not prove every other
+  source process stayed alive throughout the test.
+
+Both installed binaries have SHA-256
+`b68f4fb5cab35953e8b5d3f65b33bb3a29eeb8e655640d817fa8fa1b09f884e0`.
+Evidence: `/private/tmp/hopr-claude-completion.json`,
+`/private/tmp/hopr-claude-git-verification.json`,
+`/private/tmp/hopr-claude-agent-verification.json`, and
+`/private/tmp/hopr-claude-final-verification.json`.
+Remaining device acceptance includes an uninterrupted handoff on the final build,
+an appended-history return trip, source-power-off independence, and injected SSH
+disconnect during real native launch. Fixture tests cover return trips and faults;
+they do not replace these device checks.
 
 ## Right-click integration verification
 

@@ -114,6 +114,7 @@ type fakeRuntime struct {
 	preflightError           error
 	guardError               error
 	readyError               error
+	launchError              error
 }
 
 func (f *fakeRuntime) Preflight(context.Context, Session, bool) error { return f.preflightError }
@@ -143,11 +144,45 @@ func (f *fakeRuntime) CreateWorkspace(context.Context, string, string) (string, 
 	return f.pane, f.terminal, f.token, nil
 }
 func (f *fakeRuntime) Launch(_ context.Context, j Journal) error {
+	if f.launchError != nil {
+		return f.launchError
+	}
 	f.launches++
 	f.ready = true
 	f.stopped = false
 	f.session = Session{Host: j.Destination, Server: "default", ServerToken: j.TargetServerToken, Pane: j.TargetPane, Terminal: j.TargetTerminal, Agent: j.Source.Agent, ID: j.Source.ID, CWD: j.TargetPath, Project: j.Source.Project, PID: 5678, ProcessStart: "start-2"}
 	return nil
+}
+
+func TestRejectedLaunchRecoveryDoesNotRepeatImport(t *testing.T) {
+	a, b, _, dr := pair(t, "claude")
+	dr.launchError = fail("launch_rejected", "shell still starting; no command was sent")
+	j, err := move(t, a)
+	if err == nil || wrap(err).Code != "launch_rejected" {
+		t.Fatalf("expected confirmed rejection: %v", err)
+	}
+	target, err := b.Store.Load(j.ID)
+	must(t, err)
+	if target.Intent != "launch_rejected" || target.State != "restored" || dr.launches != 0 {
+		t.Fatalf("rejection not persisted: %+v", target)
+	}
+	dr.launchError = nil
+	b.Fault = func(point string) error {
+		if point == "before_import" || point == "before_create_workspace" {
+			t.Errorf("repeated completed effect: %s", point)
+		}
+		return nil
+	}
+	j, err = a.Recover(context.Background(), j.ID)
+	must(t, err)
+	if j.State != "complete" || dr.creates != 1 || dr.launches != 1 {
+		t.Fatalf("bad recovery: %+v creates=%d launches=%d", j, dr.creates, dr.launches)
+	}
+	_, err = a.Recover(context.Background(), j.ID)
+	must(t, err)
+	if dr.launches != 1 {
+		t.Fatal("recovery duplicated the launch")
+	}
 }
 func (f *fakeRuntime) Ready(context.Context, Journal) (bool, error) { return f.ready, f.readyError }
 

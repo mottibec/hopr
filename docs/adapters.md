@@ -29,9 +29,26 @@ SSH uses the receiver's own config at `~/.config/hopr/config.json`. Configure po
 
 Use the [standard plugin](../plugins/herdr/README.md), or add [the simple popup binding](../examples/herdr.toml) yourself. Select the agent pane, press `prefix+m` (default: Ctrl+B, release, then plain m), and choose a configured destination. The simple popup reads `HERDR_ACTIVE_PANE_ID`; the plugin captures the action's pane, workspace, terminal, session reference and server incarnation before opening its popup and revalidates them before moving. Both require `HERDR_SOCKET_PATH` to match a configured local server. An explicit `--server` selects a configured server for CLI use; the plugin refuses mismatched inherited sockets. UI machine selection alone does not retarget hopr's local socket connection.
 
+For Claude, `doctor` and destination preflight run `claude auth status --json`
+inside a short-lived Herdr diagnostic workspace. macOS Keychain access can differ
+between SSH and Herdr, so the receiver's SSH login check does not establish whether
+the destination agent can authenticate. The probe uses the configured executable
+and Claude home, returns only a nonce and success/error, and closes its own idle
+workspace. It does not send a prompt, read tokens itself, or copy credentials.
+Herdr must already be running in a context with access to that Mac's Claude login.
+The tmux and command backends retain their direct authentication check.
+
+If a probe is interrupted, it may leave a `hopr-auth-<UUID>` diagnostic workspace
+and a private `auth-probes/<UUID>` directory under Hopr's state directory. Its
+`request.json` identifies the workspace and configuration; `started` prevents
+re-execution of the same probe and `result.json` holds only the outcome. A later
+preflight runs a fresh check. No conversation is launched by these probes. Close
+an abandoned diagnostic workspace only after checking it contains no work, then
+remove its corresponding probe directory.
+
 The optional [custom Herdr client](../integrations/herdr/README.md) adds a right-click action for workspaces and panes. Stock Herdr 0.9.0 has a fixed context menu; plugin `contexts` do not extend it. The patch invokes exactly one configured Hopr popup using the existing `command.invoke` API, scoped to the clicked pane and server. Installing the Hopr binary alone does not modify Herdr. The shortcut works with stock Herdr.
 
-The built-in adapter requires protocol 22, a current official Codex/Claude integration, its exact `agent_session` UUID, idle/done state without a pending launch, and one supported foreground process. Manually started source agents do not have Herdr's managed `interactive_ready` flag; that flag is required on the destination, which Hopr starts using `agent.start`. It queries JSON APIs; it does not inspect screen text. Destination workspace labels are `hopr-<move-uuid>` for reconciliation. A socket incarnation and terminal identity guard against reused pane IDs.
+The built-in adapter requires Herdr 0.9.0 or 0.9.1 with protocol 22, a current official Codex/Claude integration, its exact `agent_session` UUID, idle/done state without a pending launch, and one supported foreground process. Manually started source agents do not have Herdr's managed `interactive_ready` flag; that flag is required on the destination, which Hopr starts using `agent.start`. It queries JSON APIs; it does not inspect screen text. Destination workspace labels are `hopr-<move-uuid>` for reconciliation. A socket incarnation and terminal identity guard against reused pane IDs.
 
 Codex can delay its session hook until the first turn. Before that hook arrives,
 destination readiness requires Herdr's managed interactive/idle state, exact

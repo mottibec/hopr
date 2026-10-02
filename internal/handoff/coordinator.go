@@ -543,7 +543,7 @@ func (e *Engine) advanceTarget(ctx context.Context, j *Journal) error {
 		if j.Intent == "launch" {
 			return e.finishTarget(ctx, j)
 		}
-		if j.Intent != "create_workspace" {
+		if j.Intent != "create_workspace" && j.Intent != "launch_rejected" {
 			if err = e.Runtime.Preflight(ctx, j.Source, true); err != nil {
 				return err
 			}
@@ -585,6 +585,11 @@ func (e *Engine) advanceTarget(ctx context.Context, j *Journal) error {
 			return err
 		}
 		if err = e.Runtime.Launch(ctx, *j); err != nil {
+			if wrap(err).Code == "launch_rejected" {
+				if saveErr := e.save(j, "restored", "launch_rejected"); saveErr != nil {
+					return saveErr
+				}
+			}
 			return err
 		}
 		if err = e.checkpoint("after_launch"); err != nil {
