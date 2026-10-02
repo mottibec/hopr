@@ -2,12 +2,15 @@ package handoff
 
 import (
 	"context"
+	"encoding/base32"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -216,6 +219,9 @@ func (h *Herdr) Inspect(ctx context.Context, pane, server string) (Session, erro
 		return s, e
 	}
 	s.AgentVersion, e = agentVersion(ctx, h.Config, s.Agent)
+	if e == nil {
+		e = captureHelpers(ctx, h.Config, &s)
+	}
 	return s, e
 }
 func (h *Herdr) Guard(ctx context.Context, s Session, stopped bool) error {
@@ -231,7 +237,7 @@ func (h *Herdr) Guard(ctx context.Context, s Session, stopped bool) error {
 		if e != nil {
 			return e
 		}
-		if current.ID != s.ID || current.PID != s.PID || current.ProcessStart != s.ProcessStart || current.CWD != s.CWD || current.Terminal != s.Terminal {
+		if current.ID != s.ID || current.PID != s.PID || current.ProcessStart != s.ProcessStart || current.CWD != s.CWD || current.Terminal != s.Terminal || current.ProcessGroup != s.ProcessGroup {
 			return fail("conflict", "source selection changed")
 		}
 	} else {
@@ -270,24 +276,10 @@ func (h *Herdr) Stop(ctx context.Context, s Session) error {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	return fail("uncertain", "graceful exit was sent but process has not stopped; no export or forced kill occurred")
+	return fail("uncertain", "graceful exit was sent but the source or its recorded helpers have not stopped; no export or forced kill occurred")
 }
 func (h *Herdr) Stopped(ctx context.Context, s Session) (bool, error) {
-	err := syscall.Kill(s.PID, 0)
-	if err == syscall.ESRCH {
-		return true, nil
-	}
-	if err != nil {
-		return false, fail("uncertain", "cannot verify source PID: %v", err)
-	}
-	start, e := processStart(ctx, s.PID)
-	if e != nil {
-		return false, e
-	}
-	if start != s.ProcessStart {
-		return false, fail("uncertain", "source PID was reused; process outcome is ambiguous")
-	}
-	return false, nil
+	return sourceStopped(ctx, s)
 }
 func (h *Herdr) Retire(ctx context.Context, s Session) error {
 	if err := h.Guard(ctx, s, true); err != nil {
@@ -365,6 +357,12 @@ func resumeArgs(s Session, path string) []string {
 	return []string{"--resume", s.ID}
 }
 func (h *Herdr) Launch(ctx context.Context, j Journal) error {
+	if !uuidPattern.MatchString(j.ID) {
+		return fail("invalid_package", "invalid move UUID")
+	}
+	id, _ := hex.DecodeString(strings.ReplaceAll(j.ID, "-", ""))
+	// Keep all UUID bits within Herdr's 32-character agent-name limit.
+	name := "hopr-" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(id))
 	token, e := h.token(h.Config.DefaultServer)
 	if e != nil {
 		return e
@@ -372,7 +370,7 @@ func (h *Herdr) Launch(ctx context.Context, j Journal) error {
 	if token != j.TargetServerToken {
 		return fail("uncertain", "destination server incarnation changed")
 	}
-	r, e := h.call(ctx, h.Config.DefaultServer, "agent.start", map[string]any{"name": "hopr-" + j.ID, "kind": j.Source.Agent, "pane_id": j.TargetPane, "args": resumeArgs(j.Source, j.TargetPath), "timeout_ms": max(4000, h.Config.TimeoutSeconds*1000)})
+	r, e := h.call(ctx, h.Config.DefaultServer, "agent.start", map[string]any{"name": name, "kind": j.Source.Agent, "pane_id": j.TargetPane, "args": resumeArgs(j.Source, j.TargetPath), "timeout_ms": max(4000, h.Config.TimeoutSeconds*1000)})
 	if e != nil {
 		return e
 	}
@@ -394,7 +392,42 @@ func (h *Herdr) Ready(ctx context.Context, j Journal) (bool, error) {
 		return false, e
 	}
 	a := r.Agent
-	return a.Terminal == j.TargetTerminal && a.CWD == j.TargetPath && a.Session != nil && a.Session.Kind == "id" && a.Session.Value == j.Source.ID && a.Session.Agent == j.Source.Agent && a.Session.Source == "herdr:"+j.Source.Agent && a.Ready && !a.Pending && (a.State == "idle" || a.State == "done"), nil
+	if a.Terminal != j.TargetTerminal || a.CWD != j.TargetPath || !a.Ready || a.Pending || (a.State != "idle" && a.State != "done") {
+		return false, nil
+	}
+	if a.Session != nil {
+		return a.Session.Kind == "id" && a.Session.Value == j.Source.ID && a.Session.Agent == j.Source.Agent && a.Session.Source == "herdr:"+j.Source.Agent, nil
+	}
+	if a.Agent != "codex" || j.Source.Agent != "codex" {
+		return false, nil
+	}
+	// Codex may delay SessionStart until the first turn. Verify its native
+	// writer and exact resume argv without sending a prompt to trigger the hook.
+	p, err := h.call(ctx, h.Config.DefaultServer, "pane.process_info", map[string]any{"pane_id": j.TargetPane})
+	if err != nil || len(p.ProcessInfo.Processes) != 1 {
+		return false, err
+	}
+	proc := p.ProcessInfo.Processes[0]
+	if proc.PID <= 1 || proc.PID == p.ProcessInfo.ShellPID || proc.CWD != j.TargetPath || len(proc.Argv) == 0 || filepath.Base(proc.Argv[0]) != "codex" || !slices.Equal(proc.Argv[1:], resumeArgs(j.Source, j.TargetPath)) {
+		return false, nil
+	}
+	table, err := processTable(ctx)
+	if err != nil {
+		return false, err
+	}
+	process, exists := table[proc.PID]
+	if !exists {
+		return false, nil
+	}
+	config := h.Config
+	config.Executables.Codex, err = processExecutable(ctx, config, process)
+	if err != nil {
+		return false, err
+	}
+	if _, err := agentVersion(ctx, config, "codex"); err != nil {
+		return false, err
+	}
+	return (Native{Config: h.Config}).ownsWriter(ctx, j.Source.ID, proc.PID)
 }
 func agentVersion(ctx context.Context, c Config, agent string) (string, error) {
 	exe := c.Executables.Codex
@@ -490,8 +523,16 @@ func commonPreflight(ctx context.Context, c Config, s Session, target bool) erro
 		if uint64(stat.Bavail)*uint64(stat.Bsize) < 3*MaxPackage {
 			return fail("dependency", "destination needs at least %d MiB available", 3*MaxPackage>>20)
 		}
-		// No native process of this kind may already be running on the target.
-		if e = noAgentProcesses(ctx, s.Agent); e != nil {
+		if s.Agent == "codex" {
+			if e = codexWriterCompatibility(ctx, c); e != nil {
+				return e
+			}
+			unlock, err := (Native{Config: c}).LockWriter(ctx, s)
+			if err != nil {
+				return err
+			}
+			unlock()
+		} else if e = noAgentProcesses(ctx, s.Agent); e != nil {
 			return e
 		}
 	}
@@ -522,23 +563,27 @@ func noAgentProcesses(ctx context.Context, agent string) error {
 	return nil
 }
 func processGuard(ctx context.Context, c Config, s Session, stopped bool) error {
-	// Refuse other processes with cwd/open files in this workspace, and native
-	// descendants (MCP servers, shells, background jobs). No process is killed.
-	b, e := run(ctx, "", nil, nil, "/bin/ps", "-axo", "pid=,ppid=")
+	table, e := processTable(ctx)
 	if e != nil {
 		return e
 	}
-	parents := map[int]int{}
-	for _, l := range strings.Split(string(b), "\n") {
-		f := strings.Fields(l)
-		if len(f) == 2 {
-			p, _ := strconv.Atoi(f[0])
-			pp, _ := strconv.Atoi(f[1])
-			parents[p] = pp
+	helpers := map[int]bool{}
+	if !stopped {
+		helpers, e = validateHelpers(ctx, c, s, table)
+		if e != nil {
+			return e
+		}
+	} else {
+		done, err := sourceStopped(ctx, s)
+		if err != nil {
+			return err
+		}
+		if !done {
+			return fail("busy", "source or recorded helper processes are still running; nothing exported")
 		}
 	}
 	allowed := map[int]bool{s.ShellPID: true}
-	for p := os.Getpid(); p > 1; p = parents[p] {
+	for p := os.Getpid(); p > 1; p = table[p].Parent {
 		if allowed[p] {
 			break
 		}
@@ -547,12 +592,7 @@ func processGuard(ctx context.Context, c Config, s Session, stopped bool) error 
 	if !stopped {
 		allowed[s.PID] = true
 	}
-	for pid, pp := range parents {
-		if pp == s.PID && pid != os.Getpid() {
-			return fail("busy", "agent has a child process %d; stop background services/subagents first", pid)
-		}
-	}
-	b, e = run(ctx, "", nil, nil, c.Executables.Lsof, "-nP", "-Fpcfan", "-u", strconv.Itoa(os.Getuid()))
+	b, e := run(ctx, "", nil, nil, c.Executables.Lsof, "-nP", "-Fpcfan", "-u", strconv.Itoa(os.Getuid()))
 	if e != nil {
 		return fail("unsupported", "cannot enumerate workspace writers with lsof: %v", e)
 	}
@@ -573,7 +613,9 @@ func processGuard(ctx context.Context, c Config, s Session, stopped bool) error 
 			access = l[1:]
 		case 'n':
 			p := l[1:]
-			if (within(s.CWD, p) || s.NativePath != "" && p == s.NativePath) && !allowed[pid] && (fd == "cwd" || access == "w" || access == "u" || access == "") {
+			// A recognized helper may inherit cwd; writable project/transcript
+			// descriptors remain blockers even for a recorded helper.
+			if (within(s.CWD, p) || s.NativePath != "" && p == s.NativePath) && !allowed[pid] && !(helpers[pid] && fd == "cwd") && (fd == "cwd" || access == "w" || access == "u" || access == "") {
 				return fail("busy", "unresolved workspace/transcript writer PID %d", pid)
 			}
 		}

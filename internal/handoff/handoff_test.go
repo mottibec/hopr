@@ -14,7 +14,18 @@ import (
 
 const testID = "11111111-2222-4333-8444-555555555555"
 
-func TestMain(m *testing.M) { os.Setenv("TMPDIR", "/private/tmp"); os.Exit(m.Run()) }
+func TestMain(m *testing.M) {
+	if len(os.Args) == 2 && os.Args[1] == "--version" && filepath.Base(os.Args[0]) == "codex" {
+		fmt.Println("codex-cli 0.160.0")
+		os.Exit(0)
+	}
+	if role := os.Getenv("HOPR_PROCESS_FIXTURE"); role != "" {
+		processFixtureMain(role)
+		os.Exit(0)
+	}
+	os.Setenv("TMPDIR", "/private/tmp")
+	os.Exit(m.Run())
+}
 func must(t *testing.T, e error) {
 	t.Helper()
 	if e != nil {
@@ -369,6 +380,11 @@ func TestTargetFailureRecovery(t *testing.T) {
 			must(t, e)
 			if j.State != "complete" || dr.creates != 1 || dr.launches != 1 {
 				t.Fatalf("duplicate effects: creates %d launch %d", dr.creates, dr.launches)
+			}
+			target, err := b.Store.Load(j.ID)
+			must(t, err)
+			if target.Owner != b.Config.HostID || j.Owner != b.Config.HostID {
+				t.Fatalf("recovered journals disagree on destination ownership: %s / %s", j.Owner, target.Owner)
 			}
 		})
 	}

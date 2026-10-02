@@ -33,6 +33,35 @@ The optional [custom Herdr client](../integrations/herdr/README.md) adds a right
 
 The built-in adapter requires protocol 22, a current official Codex/Claude integration, its exact `agent_session` UUID, idle/done state without a pending launch, and one supported foreground process. Manually started source agents do not have Herdr's managed `interactive_ready` flag; that flag is required on the destination, which Hopr starts using `agent.start`. It queries JSON APIs; it does not inspect screen text. Destination workspace labels are `hopr-<move-uuid>` for reconciliation. A socket incarnation and terminal identity guard against reused pane IDs.
 
+Codex can delay its session hook until the first turn. Before that hook arrives,
+destination readiness requires Herdr's managed interactive/idle state, exact
+resume argv and cwd from `pane.process_info`, the running executable's verified
+version, and that process holding only the expected UUID's native writer lock.
+A conflicting reported identity is always rejected. This sends no prompt and
+does not fabricate an integration report. Source selection still requires the
+official session report; an immediate return before the first user turn can
+therefore be refused. Claude requires its integration-reported identity.
+Agent names use all UUID bits encoded in lowercase base32 to fit Herdr's
+32-character limit; workspace labels retain the full UUID.
+
+Codex may have the bundled `node_repl` at
+`/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl` and the
+Computer History MCP executable under the configured Codex home. Hopr matches
+their complete installed paths and commands; a process name alone is insufficient.
+It records their identities before stopping and waits for both them and their
+process groups to exit. New/unrecognized descendants, changed identities and
+writable workspace/transcript descriptors remain blockers. Helpers at other
+installation paths are currently unsupported. Fresh destination helpers use that
+Mac's own configuration; no REPL memory or live MCP connection is transferred.
+
+Unrelated Codex processes may remain running. The destination checks the UUID's
+native writer lock before source shutdown, and holds it while planning/applying
+the import. The source also holds this lock after shutdown while snapshotting and
+transferring. Lock acquisition follows Codex's coordination-file protocol so
+native stale-lock cleanup cannot invalidate the held lock. Update Hopr on both
+Macs: journals and wire requests now include source helper identities; older
+receivers reject these fields before stopping the source.
+
 ## tmux
 
 The built-in tmux adapter uses 3.7b. It cannot infer native UUID/idle state from tmux. `hopr attest` explicitly asserts the exact session at an empty idle prompt, records its PID/start time, and expires after five minutes. Do this on the source before moving and on the destination after checking its resumed conversation. `hopr recover` can then confirm readiness. The transfer engine and native history rules are identical to Herdr's.

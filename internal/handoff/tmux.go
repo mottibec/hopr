@@ -132,6 +132,9 @@ func (t *Tmux) Attest(ctx context.Context, pane, server, agent, id string) error
 	if _, e = native.Export(s); e != nil {
 		return e
 	}
+	if e = captureHelpers(ctx, t.Config, &s); e != nil {
+		return e
+	}
 	b, e = json.Marshal(Attestation{s, time.Now().Add(5 * time.Minute)})
 	if e != nil {
 		return e
@@ -225,7 +228,7 @@ func (t *Tmux) Stop(ctx context.Context, s Session) error {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	return fail("uncertain", "source has not exited after graceful exit request")
+	return fail("uncertain", "source or its recorded helpers have not exited after graceful exit request")
 }
 
 func (t *Tmux) Stopped(ctx context.Context, s Session) (bool, error) {

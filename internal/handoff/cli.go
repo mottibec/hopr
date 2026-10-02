@@ -264,7 +264,7 @@ func menu(ctx context.Context, e *Engine, pane, server string, in io.Reader, out
 	if err != nil || n < 1 || n > len(names) {
 		return "", fail("usage", "cancelled or invalid destination")
 	}
-	fmt.Fprintf(out, "\nChecking %s before stopping this agent. Transferring over SSH; keep this popup open.\n", names[n-1])
+	fmt.Fprintf(out, "\nChecking this session and %s before stopping or transferring anything. Keep this popup open.\n", names[n-1])
 	return names[n-1], nil
 }
 

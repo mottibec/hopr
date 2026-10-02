@@ -9,6 +9,13 @@ hopr recover <move-uuid> --json
 
 `status` is read-only. It shows the local journal and queries the destination. If SSH fails, destination ownership/execution is unknown. `recover` continues the same move and may perform its remaining authorized steps. It never automatically restarts the source. Run it again after fixing a reported dependency or resolving the existing destination UI.
 
+A source with recognized Codex helpers is stopped only after the native process,
+recorded helper PIDs and their process groups have exited. Their identities live
+in the journal, so recovery still detects an orphaned helper after Codex exits.
+Hopr does not force-kill helpers or repeat an uncertain stop. Resolve only the
+identified process tree before retrying recovery; unrelated sessions may stay
+open. Do not delete native `thread-writer-locks` files to bypass a busy UUID.
+
 | Journal state | Meaning and recovery |
 | --- | --- |
 | `prepared` | Exact source is recorded. Destination preflight/reservation must succeed before stopping. A `stop` intent with a still-running PID requires manually exiting that exact source; the exit keystrokes are not resent. |
@@ -21,6 +28,11 @@ hopr recover <move-uuid> --json
 `intent` records an action before its side effect. In particular, `create_workspace` is reconciled by the durable `hopr-<UUID>` label, and `launch` is reconciled by exact native readiness. **Hopr never sends another launch after launch intent exists**, even if a crash happened just before the first launch. A lost SSH response after a successful launch therefore cannot create a second agent.
 
 If the destination shows a trust/authentication dialog, resolve it there without submitting a new instruction and recover. For tmux, also attest the actual resumed UUID at its idle prompt. If no matching workspace/process exists after uncertain creation/launch, this release stops for manual reconciliation; there is no force/replay/reset flag. Keep both journals and contact the adapter maintainer or inspect the recorded identities. Do not guess by launching the source.
+
+Keep the destination workspace open until both journals reach `complete`.
+Closing it during verification removes the terminal identity needed for normal
+recovery. Any manual reconciliation must preserve conversation extensions made
+on the destination; replaying the original import could discard newer work.
 
 For a return trip, move the destination's current pane as a **new** move UUID. Its history must extend the existing conversation on the original Mac. Equal history is allowed; divergent history or a destination ahead of the incoming conversation is rejected without destructive overwrite. Git changes return in another isolated checkout, leaving the original checkout intact.
 

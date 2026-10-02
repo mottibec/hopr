@@ -54,7 +54,7 @@ Initial built-in compatibility is deliberately narrow: **Codex 0.160.0, Claude C
 1. Confirm normal SSH works with host-key verification and without a password prompt. Tailscale connectivity alone does not configure macOS Remote Login or SSH authentication.
 2. Run `hopr doctor` on both Macs and `hopr doctor --to m4` on the source. Each Mac needs its own agent login and installed project dependencies.
 3. Configure the official Herdr native-session integration yourself if needed. hopr never edits agent settings or installs hooks silently.
-4. Select an idle agent in one Git repository, with no draft, background jobs, MCP child processes, shared app-server, or other workspace writers. Do not type into either agent during the handoff.
+4. Select an idle agent in one Git repository, with no draft, background jobs, unsupported child processes, shared app-server source, or other workspace writers. Codex's recognized Node REPL and Computer History helpers are tracked and must exit with the source before export. Do not type into either agent during the handoff.
 5. Move the exact pane:
 
 ```sh
@@ -66,6 +66,12 @@ hopr recover <move-uuid> --json
 An optional `--id <uuid>` supplies a durable idempotency key. Record the returned UUID even when the command reports an error. A repeated operation for that UUID never launches a second agent.
 
 The destination checkout is `workspace_root/<project-key>/<move-uuid>`. It is always isolated; an unrelated existing checkout is never reused or overwritten. The launch arguments are `codex resume <uuid> --cd <checkout> --no-daemon` or `claude --resume <uuid>` in the checkout. No instruction is automatically submitted. Trust/authentication dialogs can block readiness; resolve them in that destination pane, then recover.
+
+Keep the destination pane open until completion. Codex may defer its Herdr
+session report until your first turn; Hopr can verify destination readiness from
+the exact resume process and its held native UUID lock. Source selection still
+needs the integration report, so moving back immediately before your first turn
+may be refused.
 
 After snapshotting, hopr retires **only the selected source pane**, once it has become an idle shell. This prevents Herdr's native-session restore from resurrecting the source after a later server restart. It never stops the Herdr server. The source checkout, native transcript, and package remain recoverable.
 
@@ -134,8 +140,8 @@ Compatible return-trip histories are compared as JSON records, preserving numeri
 - A 256 MiB encoded-package cap bounds memory and transfer size. Large history can exceed it even with a small worktree. Destination requires at least 768 MiB available. Transfers are whole-package retries, not resumable chunks.
 - Only uncompressed native JSONL sessions are supported. Claude sidechains/auxiliary session directories and referenced local images/assets are rejected. Inline content remains. External URLs, historical absolute paths inside message/tool text, downloaded assets, Codex global memory, plugins, user skills/configuration, credentials, sandbox settings, model availability, and external services are not migrated.
 - Known secret patterns in selected files/transcripts/memory block transfer, without printing matching values. This is a conservative detector, **not** a proof that arbitrary secrets are absent; Git object history is not scanned. There is no secret-check bypass flag.
-- Process and `lsof` checks reject unresolved same-user writers and agent children. These are cooperative safeguards, not a filesystem freeze or defense against another user/root. Manual agent launches or writes outside hopr can bypass coordination. Keep both workspaces untouched until completion.
-- An existing process of the same native agent on the destination is conservatively rejected before import. This avoids uncoordinated native-history writers.
+- Process and `lsof` checks reject unresolved same-user writers and unsupported agent children. Recognized Codex helpers are recorded by PID/start time, executable, full command and process group; surviving helpers or their groups block export and recovery. Hopr never force-kills them. Their in-memory state is not migrated. These are cooperative safeguards, not a filesystem freeze or defense against another user/root. Keep both workspaces untouched until completion.
+- Other Codex sessions may run on either Mac. Hopr uses Codex's per-conversation writer lock during source snapshot/transfer and destination import, plus an exact-transcript writer check. An active writer for the same UUID blocks the move. Co-resident Codex builds with verified locking are 0.160.0, 0.159.3, 0.159.0, 0.159.0-alpha.12 and 0.159.0-alpha.12.1; unknown versions fail explicitly. The moved agent still requires 0.160.0. Claude retains its conservative destination process restriction.
 - Unknown stop/create/launch outcomes remain recoverable but may require operator intervention. hopr never automatically resumes the source. See [recovery](docs/recovery.md).
 
 ## Further documentation

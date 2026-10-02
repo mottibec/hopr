@@ -13,7 +13,7 @@ go vet ./...
 make build
 ```
 
-The latest full Go suite passed in 27.495 seconds; the latest race run passed in 30.112 seconds. `go vet ./...` and the ARM64 build passed. Fixtures use real temporary Git repositories and real native JSONL import/export; agent lifecycle and Herdr readiness are controlled adapters or a fake Unix socket. Covered behaviors include:
+The full Go suite passed in 50.991 seconds; the race detector passed in 87.763 seconds after the concurrency and readiness fixes. `go vet ./...` and the ARM64 build passed. Fixtures use real temporary Git repositories and real native JSONL import/export; agent lifecycle and Herdr readiness are controlled adapters or a fake Unix socket. Covered behaviors include:
 
 - Codex and Claude handoffs, compatible return trips, divergent/destination-ahead history rejection, differing home and project paths.
 - Exact HEAD/unpushed history, staged versus unstaged text and binaries, deletion, untracked files, explicit ignored files, modes, internal symlinks, linked worktrees and detached HEAD.
@@ -22,6 +22,10 @@ The latest full Go suite passed in 27.495 seconds; the latest race run passed in
 - Lost prepare/copy/advance responses, duplicate requests, repeated recovery, exclusive locks, missing native identity, unsupported versions/features, project-policy mismatch, unresolved writers and secret detection.
 - Herdr exact-UUID readiness and integration checks, SSH argv/stdin separation, command-adapter JSON, strict config, private setup creation and refusal to overwrite, default Claude credential-path preservation.
 - Standard Herdr plugin selection preservation across focus changes, missing context and changed server/socket/pane/workspace/terminal/session rejection.
+- Real disposable process trees: recognized helper shutdown, orphaned helpers and process groups, unknown children, PID identity changes, and writable project handles.
+- Scoped native writer locks: unrelated Codex processes stay running, the same UUID blocks, a writer arriving after preflight blocks import, and namespace coordination is honored.
+- Readiness before the first prompt: exact resume argv/cwd and a held native UUID lock; wrong/unlocked identities fail. Herdr names respect the length limit without truncating UUID identity.
+- Both journals retain destination ownership after recovery from a crash following launch.
 
 These are simulated lifecycle integrations. They do not prove a real native agent will resume an imported conversation or exit reliably under every terminal configuration.
 
@@ -32,22 +36,17 @@ Herdr 0.9.0, using an isolated server, client PTY, plugin registry and Hopr conf
 It sent ordinary Ctrl+B then m bytes, invoked the real plugin action, verified
 the original pane/server/terminal context, and opened the real Hopr menu. The
 menu correctly rejected the fixture shell's missing agent. The retained fixture
-is `/private/tmp/hopr-popup-cuk7l7ar`. No real agent was stopped and no SSH transfer
+is `/private/tmp/hopr-popup-nlld1vd1`. No real agent was stopped and no SSH transfer
 ran. This verifies terminal dispatch, not physical keyboard routing through the
 user's macOS global shortcuts.
 
 The plugin does not add native right-click entries. The optional custom-client
 verification below concerns a separate integration.
 
-The updated Hopr binary and locally linked plugin are installed on the work Mac.
-The only active Hopr binding is `prefix+m` → `hopr.move`; `server reload-config`
-returned `applied` with no diagnostics and the installed `doctor --json` passed.
-The installed binary matches `bin/hopr` (SHA-256
-`bb89687cbaa91002fcc57e5836fb6f442e65ca3138856f823a9033ad6395ddc4`).
-The previous binary and Herdr configuration were backed up with suffix
-`before-plugin-1790958441858852000` and
-`before-hopr-plugin-1790958441858852000`, respectively. The Air's binary was not
-updated in this plugin pass. No Herdr server was restarted or real session moved.
+The standard plugin is linked locally, with `prefix+m` → `hopr.move` as the
+active binding. Config reload returned `applied` with no diagnostics. The
+concurrency fix installs the same ARM64 Hopr build on both Macs, retaining binary
+backups. No Herdr server is replaced or restarted.
 
 ## Real SSH / Tailscale fixture
 
@@ -84,12 +83,55 @@ Hopr is installed at `/Users/motti/.local/bin/hopr`. `command -v hopr`, `hopr --
 
 The final installed `hopr doctor --json` returned `ok: true`: Herdr protocol, native versions, Git, SSH, and both native authentication checks passed. Installed-binary tests also verified setup creation, refusal to overwrite, missing-move/config errors, JSON responses and expected exit codes. Its SHA-256 matches the final repository build. The Claude config-path bug discovered during installation was corrected without relocating or overwriting credentials.
 
-The source has Herdr 0.9.0/protocol 22, Codex 0.160.0 and Claude 2.1.287. After the user updated Codex, the Air was verified at 0.160.0 with working login and Herdr 0.9.1/protocol 22. Claude was found under the Air's nvm installation at 2.1.286 with an unsuccessful auth check. Recheck versions, local credentials and process ownership before a real move. The latest popup/readiness build was installed locally; this pass did not update the Air's binary.
+The source has Herdr 0.9.0/protocol 22, Codex 0.160.0 and Claude 2.1.287.
+The Air has Codex 0.160.0 with working login and Herdr 0.9.1/protocol 22.
+Its co-resident desktop Codex 0.159.0-alpha.12.1 and shared daemon 0.160.0 use the
+verified native writer-lock protocol and were left running. The last Claude
+check on the Air found 2.1.286 and unsuccessful authentication; real Claude
+acceptance remains pending.
 
-The user selected the disposable source Codex session `01a0fd39-1fee-7ab3-acb6-72ea5f53fbc3` in pane `w1D:p1` for the private Mac. The first move attempt stopped during idle-readiness preflight: no source process stopped, no journal was created, and no transfer occurred. That attempt exposed a source adapter bug: manually launched agents lack Herdr's managed `interactive_ready` flag. The corrected adapter accepts independently validated idle/done source agents while retaining managed readiness checks on destination launches. Regression tests cover the omitted field. Subsequent read-only inspection found source helper children and existing destination Codex processes; those conservative writer guards have not been bypassed.
+## Selected native Codex handoff
 
-The selected real-device acceptance run still needs to verify: verify graceful stop, native transcript discovery/import/resume, exact idle readiness, source-pane retirement, power-off independence, appended-conversation return trip, and recovery after disconnect during real launch. Neither the mock integrations nor the SSH fixture constitutes that acceptance. No real user session has been migrated.
+Move: `36336847-8295-4691-88e5-6d8b7149d5a9`; native conversation:
+`01a0fd39-1fee-7ab3-acb6-72ea5f53fbc3`.
 
+- Source: work Mac, `/Users/motti/hopr-test`, Herdr `w1D:p1`.
+- Destination: private Mac through `workbox`, isolated checkout
+  `/Users/mottibechhofer/HoprWorkspaces/hopr-test/36336847-8295-4691-88e5-6d8b7149d5a9`.
+- The selected Codex PID and its Node REPL / Computer History children exited
+  gracefully. Source-pane retirement, SSH transfer, package verification, Git
+  restoration and native import ran with the other Codex sessions still open.
+- Independent Git comparisons matched HEAD and ancestor history, index entries,
+  separate binary-capable staged/unstaged diffs, file bytes, modes, symlinks and
+  untracked state. HEAD: `da6e8dcbc6decb8475e14631ba877e01941504c3`.
+- The first launch was rejected because the generated Herdr name was too long.
+  After confirming the structured rejection occurred before execution and the
+  target remained an empty shell, its journal was backed up and reconciled to
+  reuse the existing checkout/import/pane. A regression test covers the fix.
+- Codex resumed the original conversation. The user accepted its folder-trust
+  prompt, continued the conversation, then closed that workspace before Hopr
+  completed verification. The destination history extension was backed up and
+  retained when recreating the deleted workspace for this same move; the old
+  import was not replayed.
+- Missing pre-turn identity was traced to Codex's deferred SessionStart hook and
+  Herdr's two-argument resume parser. The fallback now verifies the held native
+  UUID lock, exact argv/cwd and managed interactive readiness, without submitting
+  an instruction or writing a synthetic integration report.
+
+These interventions mean this run is **not evidence of an uninterrupted,
+automatic end-to-end handoff**. Both journals now record `complete`, owner `private-mac`, pane `w7:p1`, terminal
+`term_65cdf562188f67`. Two subsequent recoveries completed without another launch;
+the destination remained PID 92591. The existing destination Codex processes
+30770, 61555, 61687 and 83016 remained running. The resumed native transcript
+retains the backed-up destination history extension.
+
+The same installed ARM64 binary on both Macs has SHA-256
+`b60841f01c84769f2ba0c4c023ecb6919a80c024926172151dfaea41e1515e1e`.
+The installed local doctor, stock-plugin PTY smoke, vet, full suite and race
+checks passed. Real Claude, source-power-off independence, a full
+return trip with appended history, and disconnect injection around a real
+launch remain to be tested. Automated tests cover those state transitions with
+controlled agent lifecycle adapters.
 
 ## Right-click integration verification
 
@@ -119,7 +161,7 @@ its build runner. System SDK selection was not changed.
 
 The smoke uses a harmless popup script. It does **not** stop/import/resume a native
 agent or transfer a project. Workspace-row selection and Local/Home duplicate-ID
-routing are covered by Rust tests. Real two-Mac native acceptance remains pending.
+routing are covered by Rust tests. The selected native handoff is recorded separately above.
 
 Installed locally: `~/.local/bin/herdr-hopr` beside the unchanged stock Herdr,
 plus the updated `~/.local/bin/hopr`. Binary hashes match `bin/` builds. The original

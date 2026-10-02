@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"regexp"
 	"time"
 )
@@ -35,22 +36,35 @@ func UUID() string {
 }
 
 type Session struct {
-	Host            string `json:"host"`
-	Server          string `json:"server"`
-	ServerToken     string `json:"server_token"`
-	Pane            string `json:"pane"`
-	Terminal        string `json:"terminal"`
-	Agent           string `json:"agent"`
-	ID              string `json:"id"`
-	CWD             string `json:"cwd"`
-	Project         string `json:"project"`
-	NativePath      string `json:"native_path"`
-	PID             int    `json:"pid"`
-	ShellPID        int    `json:"shell_pid"`
-	ProcessStart    string `json:"process_start"`
-	AgentVersion    string `json:"agent_version"`
-	WorkspacePolicy string `json:"workspace_policy"`
+	Host            string            `json:"host"`
+	Server          string            `json:"server"`
+	ServerToken     string            `json:"server_token"`
+	Pane            string            `json:"pane"`
+	Terminal        string            `json:"terminal"`
+	Agent           string            `json:"agent"`
+	ID              string            `json:"id"`
+	CWD             string            `json:"cwd"`
+	Project         string            `json:"project"`
+	NativePath      string            `json:"native_path"`
+	PID             int               `json:"pid"`
+	ShellPID        int               `json:"shell_pid"`
+	ProcessStart    string            `json:"process_start"`
+	AgentVersion    string            `json:"agent_version"`
+	WorkspacePolicy string            `json:"workspace_policy"`
+	ProcessGroup    int               `json:"process_group,omitempty"`
+	Helpers         []ProcessIdentity `json:"helpers,omitempty"`
 }
+
+type ProcessIdentity struct {
+	PID        int    `json:"pid"`
+	Parent     int    `json:"parent"`
+	Group      int    `json:"group"`
+	Start      string `json:"start"`
+	Executable string `json:"executable"`
+	Command    string `json:"command"`
+}
+
+func (s Session) equal(other Session) bool { return reflect.DeepEqual(s, other) }
 
 type File struct {
 	Path   string `json:"path"`

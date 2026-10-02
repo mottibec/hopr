@@ -213,7 +213,7 @@ func (e *Engine) advanceSource(ctx context.Context, j *Journal) error {
 				return err
 			}
 			if !stopped {
-				return fail("uncertain", "stop was attempted; source still exists. Exit this exact agent manually and run recover. No stop is resent")
+				return fail("uncertain", "stop was attempted; source or its recorded helpers still exist. Resolve this exact process tree and run recover. No stop is resent")
 			}
 		} else {
 			if err := e.intent(j, "prepare_remote"); err != nil {
@@ -257,6 +257,11 @@ func (e *Engine) advanceSource(ctx context.Context, j *Journal) error {
 			return err
 		}
 	}
+	unlockWriter, err := e.Native.LockWriter(ctx, j.Source)
+	if err != nil {
+		return err
+	}
+	defer unlockWriter()
 	if j.State == "source_stopped" {
 		if err := e.Runtime.Guard(ctx, j.Source, true); err != nil {
 			return err
@@ -455,7 +460,7 @@ func (e *Engine) Receive(ctx context.Context, r Request) (Reply, error) {
 		return reply, loadErr
 	}
 	reply.Journal = j
-	if j.Role != "target" || j.Source != r.Source || j.Destination != r.Destination {
+	if j.Role != "target" || !j.Source.equal(r.Source) || j.Destination != r.Destination {
 		return reply, fail("conflict", "move request differs from destination journal")
 	}
 	switch r.Action {
@@ -469,7 +474,7 @@ func (e *Engine) Receive(ctx context.Context, r Request) (Reply, error) {
 		if err != nil {
 			return reply, err
 		}
-		if p.MoveID != j.ID || p.Source != j.Source || p.Destination != j.Destination {
+		if p.MoveID != j.ID || !p.Source.equal(j.Source) || p.Destination != j.Destination {
 			return reply, fail("invalid_package", "package does not match prepared move")
 		}
 		if stateRank(j.State) >= stateRank("copied") {
@@ -542,31 +547,7 @@ func (e *Engine) advanceTarget(ctx context.Context, j *Journal) error {
 			if err = e.Runtime.Preflight(ctx, j.Source, true); err != nil {
 				return err
 			}
-			planPath := filepath.Join(e.Store.Dir(j.ID), "import-plan.json")
-			var plan ImportPlan
-			if planBytes, er := os.ReadFile(planPath); er == nil {
-				if err = decodeStrict(planBytes, &plan); err != nil {
-					return err
-				}
-			} else if os.IsNotExist(er) {
-				plan, err = e.Native.PlanImport(j.Source, p.Conversation, j.TargetPath)
-				if err != nil {
-					return err
-				}
-				pb, _ := json.Marshal(plan)
-				if err = atomicWrite(planPath, pb, 0600); err != nil {
-					return err
-				}
-			} else {
-				return er
-			}
-			if err = e.intent(j, "import"); err != nil {
-				return err
-			}
-			if err = ApplyImport(plan, filepath.Join(e.Store.Dir(j.ID), "native-backups")); err != nil {
-				return err
-			}
-			if err = e.checkpoint("after_import"); err != nil {
+			if err = e.importConversation(ctx, j, p.Conversation); err != nil {
 				return err
 			}
 		}
@@ -616,6 +597,42 @@ func (e *Engine) advanceTarget(ctx context.Context, j *Journal) error {
 	}
 	return nil
 }
+func (e *Engine) importConversation(ctx context.Context, j *Journal, conversation Conversation) error {
+	unlock, err := e.Native.LockWriter(ctx, j.Source)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	planPath := filepath.Join(e.Store.Dir(j.ID), "import-plan.json")
+	var plan ImportPlan
+	if planBytes, er := os.ReadFile(planPath); er == nil {
+		if err = decodeStrict(planBytes, &plan); err != nil {
+			return err
+		}
+	} else if os.IsNotExist(er) {
+		plan, err = e.Native.PlanImport(j.Source, conversation, j.TargetPath)
+		if err != nil {
+			return err
+		}
+		pb, _ := json.Marshal(plan)
+		if err = atomicWrite(planPath, pb, 0600); err != nil {
+			return err
+		}
+	} else {
+		return er
+	}
+	if err = e.intent(j, "import"); err != nil {
+		return err
+	}
+	if err = ApplyImport(plan, filepath.Join(e.Store.Dir(j.ID), "native-backups")); err != nil {
+		return err
+	}
+	if err = e.checkpoint("after_import"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (e *Engine) finishTarget(ctx context.Context, j *Journal) error {
 	ready, err := e.Runtime.Ready(ctx, *j)
 	if err != nil {
@@ -623,6 +640,9 @@ func (e *Engine) finishTarget(ctx context.Context, j *Journal) error {
 	}
 	if !ready {
 		return fail("uncertain", "destination launch intent exists but exact session readiness is unconfirmed. Resolve its UI, then recover; no second launch is sent")
+	}
+	if err = e.setOwner(j, e.Config.HostID); err != nil {
+		return err
 	}
 	if err = e.save(j, "target_ready", ""); err != nil {
 		return err

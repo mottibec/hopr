@@ -6,10 +6,76 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 )
+
+func TestHerdrLaunchUsesValidUniqueAgentName(t *testing.T) {
+	names := map[string]bool{}
+	h, token := apiFixture(t, func(method string, raw json.RawMessage) any {
+		if method != "agent.start" {
+			t.Errorf("unexpected %s", method)
+		}
+		var params struct {
+			Name string `json:"name"`
+		}
+		must(t, json.Unmarshal(raw, &params))
+		if !regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`).MatchString(params.Name) {
+			t.Errorf("invalid Herdr agent name: %q", params.Name)
+		}
+		if names[params.Name] {
+			t.Errorf("different moves share agent name %s", params.Name)
+		}
+		names[params.Name] = true
+		return map[string]any{"agent": paneInfo{Terminal: "target"}}
+	})
+	for _, id := range []string{testID, "11111111-2222-4333-8444-555555555556"} {
+		must(t, h.Launch(context.Background(), Journal{ID: id, TargetServerToken: token, TargetTerminal: "target", TargetPane: "w2:p1", Source: Session{Agent: "codex", ID: testID}}))
+	}
+}
+
+func TestHerdrReadyBeforeFirstPromptUsesNativeWriter(t *testing.T) {
+	c := configFixture(t, "m4", t.TempDir())
+	pid := startNativeWriter(t, c, testID, false)
+	for _, mode := range []string{"valid", "wrong-argv", "wrong-cwd", "wrong-session", "other-writer", "pending"} {
+		t.Run(mode, func(t *testing.T) {
+			j := Journal{TargetPane: "w2:p1", TargetTerminal: "target", TargetPath: "/target", Source: Session{Agent: "codex", ID: testID}}
+			h, token := apiFixture(t, func(method string, raw json.RawMessage) any {
+				if method == "agent.get" {
+					a := paneInfo{Agent: "codex", Terminal: "target", CWD: "/target", State: "idle", Ready: true, Pending: mode == "pending"}
+					if mode == "wrong-session" {
+						a.Session = &agentSession{Agent: "codex", Kind: "id", Value: UUID(), Source: "herdr:codex"}
+					}
+					return map[string]any{"agent": a}
+				}
+				if method != "pane.process_info" {
+					t.Fatalf("unexpected method %s", method)
+				}
+				args := append([]string{"codex"}, resumeArgs(j.Source, j.TargetPath)...)
+				cwd := j.TargetPath
+				if mode == "wrong-argv" {
+					args[2] = UUID()
+				}
+				if mode == "wrong-cwd" {
+					cwd = "/other"
+				}
+				return map[string]any{"process_info": map[string]any{"shell_pid": 1, "foreground_processes": []any{map[string]any{"pid": pid, "argv": args, "cwd": cwd}}}}
+			})
+			h.Config.CodexHome, h.Config.Executables = c.CodexHome, c.Executables
+			j.TargetServerToken = token
+			if mode == "other-writer" {
+				j.Source.ID = UUID()
+			}
+			ready, err := h.Ready(context.Background(), j)
+			must(t, err)
+			if ready != (mode == "valid") {
+				t.Fatalf("ready=%v for %s", ready, mode)
+			}
+		})
+	}
+}
 
 func apiFixture(t *testing.T, result func(string, json.RawMessage) any) (*Herdr, string) {
 	t.Helper()
