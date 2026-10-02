@@ -86,9 +86,8 @@ The final installed `hopr doctor --json` returned `ok: true`: Herdr protocol, na
 The source has Herdr 0.9.0/protocol 22, Codex 0.160.0 and Claude 2.1.287.
 The Air has Codex 0.160.0 with working login and Herdr 0.9.1/protocol 22.
 Its co-resident desktop Codex 0.159.0-alpha.12.1 and shared daemon 0.160.0 use the
-verified native writer-lock protocol and were left running. The last Claude
-check on the Air found 2.1.286 and unsuccessful authentication; real Claude
-acceptance remains pending.
+verified native writer-lock protocol and were left running. Claude 2.1.287 was subsequently installed privately on the Air for the selected
+Claude test below; its existing 2.1.286 installation was retained.
 
 ## Selected native Codex handoff
 
@@ -132,6 +131,33 @@ checks passed. Real Claude, source-power-off independence, a full
 return trip with appended history, and disconnect injection around a real
 launch remain to be tested. Automated tests cover those state transitions with
 controlled agent lifecycle adapters.
+
+## Selected Claude test (pending authentication)
+
+The user selected a disposable Claude test in `/Users/motti/hopr-test`, keeping
+the other source Claude/Codex sessions open. Herdr pane `w1H:p1`, native UUID
+`fcfe3796-fbf1-4ec0-9133-1eee1c0356d7`, completed the initial fixture prompt and
+passed the real source identity/process/writer guard. Git state was recorded for
+an independent destination comparison.
+
+The verified ARM64 Claude 2.1.287 executable was copied into
+`~/.local/share/hopr/tools/claude-2.1.287/claude` on Home (SHA-256
+`6eab8333fe2121553100d8f40bfada384a3e989b94f947e18ba6677a6fcb41ea`). Only Hopr's
+executable setting was updated, with a config backup. No credentials or agent
+configuration were copied from the source.
+
+Move `0227b615-e7a6-4eeb-b9e9-c5983ef31a0a` stopped at destination preparation:
+Claude's `auth status --json` over SSH reported `loggedIn: false` after the user
+reported completing login. Both ordinary and TTY SSH checks gave that result.
+A Claude Keychain item exists, but a credential-access probe with its output
+discarded failed. Switching the probe to the GUI audit session with
+`launchctl asuser` was denied by macOS; that route was not pursued further.
+Local GUI authentication status is awaiting user verification.
+
+The source is still running. Its journal is `prepared` / `prepare_remote`; no
+Claude source stop, export package, target checkout, import or launch occurred.
+Use **this same move ID** with `hopr recover` once destination authentication is
+available to the receiver. This is not a completed Claude acceptance test.
 
 ## Right-click integration verification
 
