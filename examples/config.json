@@ -1,0 +1,29 @@
+{
+  "host_id": "m2",
+  "backend": "herdr",
+  "state_dir": "~/.local/state/hopr",
+  "workspace_root": "~/HoprWorkspaces",
+  "default_server": "default",
+  "servers": { "default": "~/.config/herdr/herdr.sock" },
+  "hosts": { "m4": { "ssh": "private-mac", "id": "m4" } },
+  "projects": {
+    "my-project": {
+      "path": "~/sources/my-project",
+      "include_ignored": [],
+      "claude_memory": false,
+      "requirements": [["/usr/bin/git", "--version"]]
+    }
+  },
+  "executables": {
+    "git": "/usr/bin/git",
+    "ssh": "/usr/bin/ssh",
+    "herdr": "~/.local/bin/herdr",
+    "codex": "~/.local/bin/codex",
+    "claude": "~/.local/bin/claude",
+    "lsof": "/usr/sbin/lsof",
+    "tmux": "/opt/homebrew/bin/tmux"
+  },
+  "codex_home": "~/.codex",
+  "claude_home": "~/.claude",
+  "timeout_seconds": 60
+}
