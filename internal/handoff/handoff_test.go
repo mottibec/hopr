@@ -167,8 +167,8 @@ func pair(t *testing.T, agent string) (*Engine, *Engine, *fakeRuntime, *fakeRunt
 	root := repo(t)
 	a := configFixture(t, "m2", root)
 	b := configFixture(t, "m4", filepath.Join(t.TempDir(), "different-home", "project"))
-	a.Hosts["m4"] = Host{"m4-tail", "m4"}
-	b.Hosts["m2"] = Host{"m2-tail", "m2"}
+	a.Hosts["m4"] = Host{SSH: "m4-tail", ID: "m4"}
+	b.Hosts["m2"] = Host{SSH: "m2-tail", ID: "m2"}
 	src := New(a)
 	dst := New(b)
 	path := nativeFixture(t, a, agent, root)

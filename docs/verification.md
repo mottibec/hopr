@@ -13,7 +13,7 @@ go vet ./...
 make build
 ```
 
-The final full suite passed in 25.231 seconds; the final race run passed in 27.953 seconds. `go vet ./...` and the ARM64 build passed. Fixtures use real temporary Git repositories and real native JSONL import/export; agent lifecycle and Herdr readiness are controlled adapters or a fake Unix socket. Covered behaviors include:
+The latest full Go suite passed in 26.860 seconds; the latest race run passed in 33.368 seconds. `go vet ./...` and the ARM64 build passed. Fixtures use real temporary Git repositories and real native JSONL import/export; agent lifecycle and Herdr readiness are controlled adapters or a fake Unix socket. Covered behaviors include:
 
 - Codex and Claude handoffs, compatible return trips, divergent/destination-ahead history rejection, differing home and project paths.
 - Exact HEAD/unpushed history, staged versus unstaged text and binaries, deletion, untracked files, explicit ignored files, modes, internal symlinks, linked worktrees and detached HEAD.
@@ -55,10 +55,50 @@ Passed on installed tmux 3.7b using a unique disposable server, which the test s
 
 ## Local installation and remaining device checks
 
-Hopr is installed at `/Users/motti/.local/bin/hopr`. `command -v hopr`, `hopr --version`, `hopr --help`, JSON error/exit behavior, and `hopr setup` were exercised against the installed binary. Setup created `/Users/motti/.config/hopr/config.json` with local ID `work-mac` and destination `private-mac` through `workbox`. It contains no project mapping yet because no real project/session was selected. The Herdr keybinding was not installed automatically.
+Hopr is installed at `/Users/motti/.local/bin/hopr`. `command -v hopr`, `hopr --version`, `hopr --help`, JSON error/exit behavior, and `hopr setup` were exercised against the installed binary. Setup created `/Users/motti/.config/hopr/config.json` with local ID `work-mac` and destination `private-mac` through `workbox`. Both Macs now have a disposable `hopr-test` project mapping. The private destination uses the friendly label `Home`. On the user-requested right-click integration pass, the local Herdr popup binding was added after announcing the change and backing up config; `server reload-config` returned `applied` with no diagnostics. No Herdr server was restarted.
 
 The final installed `hopr doctor --json` returned `ok: true`: Herdr protocol, native versions, Git, SSH, and both native authentication checks passed. Installed-binary tests also verified setup creation, refusal to overwrite, missing-move/config errors, JSON responses and expected exit codes. Its SHA-256 matches the final repository build. The Claude config-path bug discovered during installation was corrected without relocating or overwriting credentials.
 
-The source has Herdr 0.9.0/protocol 22, Codex 0.160.0 and Claude 2.1.287. Earlier read-only checks found Herdr 0.9.1/protocol 22 and Codex 0.159.3 on the Air; Claude and tmux were absent from the inspected standard locations. Recheck before use. The Codex version mismatch currently blocks a real move. Align supported versions, install/configure Hopr on the Air, configure a shared project, and verify each host's own authentication.
+The source has Herdr 0.9.0/protocol 22, Codex 0.160.0 and Claude 2.1.287. After the user updated Codex, the Air was verified at 0.160.0 with working login and Herdr 0.9.1/protocol 22. Claude was found under the Air's nvm installation at 2.1.286 with an unsuccessful auth check. Recheck versions, local credentials and process ownership before a real move. The latest popup/readiness build was installed locally; this pass did not update the Air's binary.
 
-A real-device acceptance run still needs an explicitly selected disposable **real** agent session and destination: verify graceful stop, native transcript discovery/import/resume, exact idle readiness, source-pane retirement, power-off independence, appended-conversation return trip, and recovery after disconnect during real launch. Neither the mock integrations nor the SSH fixture constitutes that acceptance. No real user session has been migrated.
+The user selected the disposable source Codex session `01a0fd39-1fee-7ab3-acb6-72ea5f53fbc3` in pane `w1D:p1` for the private Mac. The first move attempt stopped during idle-readiness preflight: no source process stopped, no journal was created, and no transfer occurred. That attempt exposed a source adapter bug: manually launched agents lack Herdr's managed `interactive_ready` flag. The corrected adapter accepts independently validated idle/done source agents while retaining managed readiness checks on destination launches. Regression tests cover the omitted field. Subsequent read-only inspection found source helper children and existing destination Codex processes; those conservative writer guards have not been bypassed.
+
+The selected real-device acceptance run still needs to verify: verify graceful stop, native transcript discovery/import/resume, exact idle readiness, source-pane retirement, power-off independence, appended-conversation return trip, and recovery after disconnect during real launch. Neither the mock integrations nor the SSH fixture constitutes that acceptance. No real user session has been migrated.
+
+
+## Right-click integration verification
+
+The patch is pinned to Herdr v0.9.0 at
+`b99002ac99b09e00b4ca692436cb15a6b0d676f1`. Rust 1.96.1 and Zig 0.15.2 were
+installed in build tooling; Zig needed the already-installed macOS 15.4 SDK for
+its build runner. System SDK selection was not changed.
+
+- `cargo fmt --check` and macOS `cargo clippy --all-targets --locked -- -D warnings` passed.
+- `just test-one hopr`: all five new client regression tests passed.
+- Full nextest run: **3,106 passed, 2 failed, 2 skipped**. Both failures reproduced
+  on a separate untouched checkout of the exact upstream tag:
+  `live_handoff_preserves_pane_process_io` (`Invalid argument`, OS error 22), and
+  `live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session` (agent detection
+  timeout). Thus `just check` is **not green** on this machine; these failures also
+  occur without the Hopr patch. No test was disabled or expectation weakened.
+- `just windows-lint` passed. Maintenance, UI architecture, integration assets,
+  plugin marketplace and docs contract recipes all passed when run separately.
+- The ARM64 release binary built successfully. The patch applies cleanly to the
+  pinned untouched source tree.
+- `python3 integrations/herdr/smoke.py bin/herdr-hopr ~/.local/bin/herdr` passed
+  against a real disposable **stock Herdr 0.9.0 server** and patched client. Actual
+  terminal mouse input opened the pane's right-click action and launched the
+  configured capture popup. It received the exact `w1:p1` / `w1` identities and
+  the isolated server socket. Fixture retained at `/private/tmp/hopr-popup-uist7kja`.
+  A patched-server run also passed at `/private/tmp/hopr-popup-r0jlm9or`.
+
+The smoke uses a harmless popup script. It does **not** stop/import/resume a native
+agent or transfer a project. Workspace-row selection and Local/Home duplicate-ID
+routing are covered by Rust tests. Real two-Mac native acceptance remains pending.
+
+Installed locally: `~/.local/bin/herdr-hopr` beside the unchanged stock Herdr,
+plus the updated `~/.local/bin/hopr`. Binary hashes match `bin/` builds. The original
+Herdr config backup is
+`~/.config/herdr/config.toml.before-hopr-rightclick-1790956301004185000`.
+The new menu appears when opening the custom client; existing stock-client windows
+keep their original menus. Latest installed `hopr doctor --json` passed.

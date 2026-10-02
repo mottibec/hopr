@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 type Executables struct {
@@ -20,8 +21,9 @@ type Executables struct {
 	Tmux   string `json:"tmux"`
 }
 type Host struct {
-	SSH string `json:"ssh"`
-	ID  string `json:"id"`
+	SSH   string `json:"ssh"`
+	ID    string `json:"id"`
+	Label string `json:"label,omitempty"`
 }
 type Project struct {
 	Path           string     `json:"path"`
@@ -128,6 +130,9 @@ func (c *Config) normalize() error {
 	for name, h := range c.Hosts {
 		if !labelPattern.MatchString(name) || !labelPattern.MatchString(h.ID) || !sshPattern.MatchString(h.SSH) || h.ID == c.HostID {
 			return fail("configuration", "invalid destination %q", name)
+		}
+		if len(h.Label) > 80 || strings.IndexFunc(h.Label, unicode.IsControl) >= 0 {
+			return fail("configuration", "destination %q label must be at most 80 bytes without control characters", name)
 		}
 	}
 	for name, p := range c.Projects {

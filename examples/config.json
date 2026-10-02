@@ -5,7 +5,7 @@
   "workspace_root": "~/HoprWorkspaces",
   "default_server": "default",
   "servers": { "default": "~/.config/herdr/herdr.sock" },
-  "hosts": { "m4": { "ssh": "private-mac", "id": "m4" } },
+  "hosts": { "m4": { "ssh": "private-mac", "id": "m4", "label": "Home" } },
   "projects": {
     "my-project": {
       "path": "~/sources/my-project",

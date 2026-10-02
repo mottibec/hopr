@@ -23,7 +23,7 @@ Hopr uses newline-delimited JSON requests over a configured local Unix socket: `
 
 `agent_session` must have `source: herdr:codex` or `herdr:claude`, matching `agent`, `kind: id`, and the exact UUID. Missing integration identity is unsupported. A pane ID alone is never treated as global.
 
-Herdr's experimental live handoff replaces a server on the **same host**. Hopr implements a separate application handoff across hosts. Herdr's right-click menu is fixed in the inspected 0.9.0 source; plugin action context metadata does not extend it. The supplied integration is a documented custom-command popup.
+Herdr's experimental live handoff replaces a server on the **same host**. Hopr implements a separate application handoff across hosts. Herdr's right-click menu is fixed in the inspected 0.9.0 source; plugin action context metadata does not extend it. The supplied shortcut is a documented custom-command popup. An optional [client patch](../integrations/herdr/README.md) adds the right-click action using existing `command.invoke` parameters `command_id`, `workspace_id`, `tab_id`, `pane_id`, and `selection`, without changing the wire schema.
 
 ## Native agents
 

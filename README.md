@@ -8,7 +8,7 @@ The terminal manager is an adapter, separate from the transfer engine:
 
 | Backend | Session selection and readiness |
 | --- | --- |
-| **Herdr** | Exact integration-reported UUID; semantic idle/interactive readiness from its JSON API. Popup or CLI. |
+| **Herdr** | Exact integration-reported UUID and idle/done source state; managed interactive readiness on the destination. Popup or CLI. |
 | **tmux** | Explicit operator identity/idle attestations, bound to the native PID and server. tmux cannot report conversation readiness itself. |
 | **Command adapter** | Documented JSON-over-stdin contract for other terminal managers. No terminal-output scraping. |
 
@@ -77,13 +77,15 @@ Add [examples/herdr.toml](examples/herdr.toml) yourself:
 [[keys.command]]
 key = "prefix+alt+m"
 type = "popup"
-command = "hopr menu"
+command = '"$HOME/.local/bin/hopr" menu'
 description = "Move agent to another Mac"
 ```
 
 `menu` reads `HERDR_ACTIVE_PANE_ID` for the underlying pane. It resolves `HERDR_SOCKET_PATH` only against configured servers. Unknown inherited sockets fail. `--server` overrides the source explicitly; pane IDs are scoped to that server. Selecting another machine in Herdr's UI does not retarget CLI commands. Run hopr on the host that owns the pane.
 
-The workflow is **select pane → shortcut → choose Mac**. Hopr does not add a right-click entry: the inspected Herdr 0.9.0 context menu has no plugin-action extension point. Adding that affordance requires a Herdr change; see [integration details](docs/adapters.md#herdr).
+The stock Herdr workflow is **select pane → shortcut → choose Mac**. For **right-click workspace → Move to another Mac → Home**, build the optional [custom Herdr client](integrations/herdr/README.md). Its patch uses the existing server API; it does not replace or restart your server. Installing Hopr alone does not change stock Herdr menus.
+
+Destinations can have an optional `label`, such as `"Home"`, in `hosts`. Labels are display-only; SSH aliases and verified host identities remain explicit. Menu results stay visible until Enter.
 
 Herdr's experimental `--handoff` replaces its server on the same host; it is unrelated to hopr's cross-host application handoff.
 

@@ -1,5 +1,5 @@
 [[keys.command]]
 key = "prefix+alt+m"
 type = "popup"
-command = "hopr menu"
+command = '"$HOME/.local/bin/hopr" menu'
 description = "Move agent to another Mac"

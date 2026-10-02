@@ -91,6 +91,9 @@ func Main(ctx context.Context, args []string, in io.Reader, out, errout io.Write
 		result, err := setup(Expand(configPath), rest[1:], errout)
 		return printOutput(out, jsonOutput, result, err)
 	}
+	if rest[0] == "menu" {
+		in = bufio.NewReader(in)
+	}
 	c, err := LoadConfig(Expand(configPath))
 	var result any
 	if err == nil {
@@ -189,7 +192,12 @@ func Main(ctx context.Context, args []string, in io.Reader, out, errout io.Write
 			}
 		}
 	}
-	return printOutput(out, jsonOutput, result, err)
+	code := printOutput(out, jsonOutput, result, err)
+	if rest[0] == "menu" && !jsonOutput {
+		fmt.Fprint(out, "\nPress Enter to close: ")
+		_, _ = bufio.NewReader(in).ReadString('\n')
+	}
+	return code
 }
 func printOutput(out io.Writer, jsonOutput bool, result any, err error) int {
 	response := Output{OK: err == nil, Result: result}
@@ -215,18 +223,28 @@ func menu(ctx context.Context, e *Engine, pane, server string, in io.Reader, out
 		names = append(names, k)
 	}
 	sort.Strings(names)
+	if len(names) == 0 {
+		return "", fail("configuration", "no destinations configured; add a host to the Hopr config")
+	}
 	for i, n := range names {
-		fmt.Fprintf(out, "%d. %s\n", i+1, n)
+		label := e.Config.Hosts[n].Label
+		if label == "" || label == n {
+			label = n
+		} else {
+			label += " (" + n + ")"
+		}
+		fmt.Fprintf(out, "%d. %s\n", i+1, label)
 	}
 	fmt.Fprint(out, "Destination number (empty cancels): ")
-	scan := bufio.NewScanner(in)
-	if !scan.Scan() {
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil {
 		return "", fail("usage", "cancelled")
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(scan.Text()))
+	n, err := strconv.Atoi(strings.TrimSpace(line))
 	if err != nil || n < 1 || n > len(names) {
 		return "", fail("usage", "cancelled or invalid destination")
 	}
+	fmt.Fprintf(out, "\nChecking %s before stopping this agent. Transferring over SSH; keep this popup open.\n", names[n-1])
 	return names[n-1], nil
 }
 

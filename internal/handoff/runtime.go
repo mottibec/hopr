@@ -165,8 +165,11 @@ func (h *Herdr) Inspect(ctx context.Context, pane, server string) (Session, erro
 	if a.Session.Source != "herdr:"+s.Agent {
 		return s, fail("unsupported", "session identity was not reported by the official integration")
 	}
-	if a.State != "idle" || !a.Ready || a.Pending {
-		return s, fail("busy", "agent must be idle and interactively ready")
+	// Herdr reports interactive_ready only for agent.start-managed launches.
+	// Manually launched sources use the reported idle/done state; the exact
+	// native process and its cessation are verified separately below.
+	if (a.State != "idle" && a.State != "done") || a.Pending {
+		return s, fail("busy", "source agent must be idle or done with no pending launch")
 	}
 	if s.CWD == "" {
 		return s, fail("unsupported", "foreground cwd is unavailable")
@@ -391,7 +394,7 @@ func (h *Herdr) Ready(ctx context.Context, j Journal) (bool, error) {
 		return false, e
 	}
 	a := r.Agent
-	return a.Terminal == j.TargetTerminal && a.CWD == j.TargetPath && a.Session != nil && a.Session.Kind == "id" && a.Session.Value == j.Source.ID && a.Session.Agent == j.Source.Agent && a.Session.Source == "herdr:"+j.Source.Agent && a.Ready && !a.Pending && a.State == "idle", nil
+	return a.Terminal == j.TargetTerminal && a.CWD == j.TargetPath && a.Session != nil && a.Session.Kind == "id" && a.Session.Value == j.Source.ID && a.Session.Agent == j.Source.Agent && a.Session.Source == "herdr:"+j.Source.Agent && a.Ready && !a.Pending && (a.State == "idle" || a.State == "done"), nil
 }
 func agentVersion(ctx context.Context, c Config, agent string) (string, error) {
 	exe := c.Executables.Codex

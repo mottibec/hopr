@@ -1,0 +1,398 @@
+diff --git a/src/client/shell/context_menu.rs b/src/client/shell/context_menu.rs
+index af271bb..3af0016 100644
+--- a/src/client/shell/context_menu.rs
++++ b/src/client/shell/context_menu.rs
+@@ -5,7 +5,7 @@ impl ClientContextMenuOverlay {
+         use ClientContextMenuAction as Action;
+ 
+         let item = |label, action| ClientContextMenuItem { label, action };
+-        match &self.target {
++        let mut items = match &self.target {
+             ClientContextMenuTarget::Workspace { is_git: false, .. } => {
+                 vec![item("Rename", Action::Rename), item("Close", Action::Close)]
+             }
+@@ -75,7 +75,14 @@ impl ClientContextMenuOverlay {
+                 ]);
+                 items
+             }
++        };
++        if matches!(
++            self.target,
++            ClientContextMenuTarget::Workspace { .. } | ClientContextMenuTarget::Pane { .. }
++        ) {
++            items.push(item("Move to another Mac...", Action::HoprMove));
+         }
++        items
+     }
+ }
+ 
+@@ -109,6 +116,8 @@ impl ClientShellState {
+         let collapsed =
+             worktree.is_some_and(|worktree| self.collapsed_groups.contains(&worktree.key));
+         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
++            endpoint_id: self.active_endpoint_id.clone(),
++            boot_id: snapshot.boot_id.clone(),
+             target: ClientContextMenuTarget::Workspace {
+                 workspace_id,
+                 is_git: worktree.is_some() || workspace.branch.is_some(),
+@@ -123,14 +132,15 @@ impl ClientShellState {
+     }
+ 
+     pub(super) fn open_tab_context_menu(&mut self, tab_id: String, x: u16, y: u16) {
+-        let Some(tab) = self
+-            .snapshot
+-            .as_deref()
+-            .and_then(|snapshot| snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id))
+-        else {
++        let Some(snapshot) = self.snapshot.as_deref() else {
++            return;
++        };
++        let Some(tab) = snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id) else {
+             return;
+         };
+         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
++            endpoint_id: self.active_endpoint_id.clone(),
++            boot_id: snapshot.boot_id.clone(),
+             target: ClientContextMenuTarget::Tab {
+                 tab_id,
+                 workspace_id: tab.workspace_id.clone(),
+@@ -153,6 +163,8 @@ impl ClientShellState {
+             .clone()
+             .filter(|focused| focused != &pane_id);
+         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
++            endpoint_id: self.active_endpoint_id.clone(),
++            boot_id: snapshot.boot_id.clone(),
+             target: ClientContextMenuTarget::Pane {
+                 pane_id,
+                 workspace_id: pane.workspace_id.clone(),
+@@ -190,6 +202,11 @@ impl ClientShellState {
+             outcome.repaint = true;
+             return;
+         };
++        if action == ClientContextMenuAction::HoprMove {
++            self.invoke_hopr_menu(menu, outcome);
++            outcome.repaint = true;
++            return;
++        }
+         match menu.target {
+             ClientContextMenuTarget::Workspace { workspace_id, .. } => {
+                 self.activate_workspace_context_action(workspace_id, action, outcome)
+@@ -216,6 +233,76 @@ impl ClientShellState {
+         outcome.repaint = true;
+     }
+ 
++    fn invoke_hopr_menu(&mut self, menu: ClientContextMenuOverlay, outcome: &mut ClientShellInput) {
++        use crate::api::schema::{CommandInvokeParams, Method};
++        use crate::protocol::ClientShellCommandAction;
++
++        let Some(snapshot) = self.snapshot.as_deref() else {
++            return;
++        };
++        if menu.endpoint_id != self.active_endpoint_id || menu.boot_id != snapshot.boot_id {
++            self.endpoint_error = Some("The source machine changed; open the menu again".into());
++            return;
++        }
++        let (workspace_id, pane_id) = match menu.target {
++            ClientContextMenuTarget::Workspace { workspace_id, .. } => {
++                let mut agents = snapshot
++                    .agents
++                    .iter()
++                    .filter(|agent| agent.workspace_id == workspace_id);
++                let pane_id = match (agents.next(), agents.next()) {
++                    (Some(agent), None) => agent.pane_id.clone(),
++                    _ => {
++                        self.endpoint_error = Some("Move requires one agent in the clicked workspace; right-click the specific agent pane".into());
++                        return;
++                    }
++                };
++                (workspace_id, pane_id)
++            }
++            ClientContextMenuTarget::Pane {
++                workspace_id,
++                pane_id,
++                ..
++            } => (workspace_id, pane_id),
++            ClientContextMenuTarget::Tab { .. } => return,
++        };
++        if !snapshot
++            .panes
++            .iter()
++            .any(|pane| pane.pane_id == pane_id && pane.workspace_id == workspace_id)
++        {
++            self.endpoint_error = Some("The source pane disappeared; open the menu again".into());
++            return;
++        }
++        // The existing command manifest exposes descriptions and opaque IDs, not shell commands.
++        let mut commands = snapshot.commands.iter().filter(|command| {
++            command.action == ClientShellCommandAction::Popup
++                && command.description.as_deref() == Some("Move agent to another Mac")
++        });
++        let command_id = match (commands.next(), commands.next()) {
++            (Some(command), None) => command.command_id.clone(),
++            _ => {
++                self.endpoint_error = Some("Configure exactly one Hopr popup on this machine with description 'Move agent to another Mac', then reload config".into());
++                return;
++            }
++        };
++        self.popup_pending = true;
++        self.popup_pending_deadline = None;
++        if !self.push_endpoint_method_with_kind(
++            Method::CommandInvoke(CommandInvokeParams {
++                command_id,
++                workspace_id: Some(workspace_id),
++                tab_id: None,
++                pane_id: Some(pane_id),
++                selection: None,
++            }),
++            PendingEndpointKind::PopupCommand,
++            outcome,
++        ) {
++            self.popup_pending = false;
++        }
++    }
++
+     fn activate_workspace_context_action(
+         &mut self,
+         workspace_id: String,
+diff --git a/src/client/shell/state.rs b/src/client/shell/state.rs
+index 81845d3..b89e37b 100644
+--- a/src/client/shell/state.rs
++++ b/src/client/shell/state.rs
+@@ -581,6 +581,7 @@ pub(super) enum ClientContextMenuAction {
+     Zoom,
+     ToggleRightClickPassthrough,
+     ClosePane,
++    HoprMove,
+ }
+ 
+ #[derive(Debug)]
+@@ -607,6 +608,8 @@ pub(super) enum ClientContextMenuTarget {
+ 
+ #[derive(Debug)]
+ pub(super) struct ClientContextMenuOverlay {
++    pub(super) endpoint_id: crate::client::endpoint::ClientEndpointId,
++    pub(super) boot_id: String,
+     pub(super) target: ClientContextMenuTarget,
+     pub(super) x: u16,
+     pub(super) y: u16,
+diff --git a/src/client/shell/tests/hopr.rs b/src/client/shell/tests/hopr.rs
+new file mode 100644
+index 0000000..5ee1a86
+--- /dev/null
++++ b/src/client/shell/tests/hopr.rs
+@@ -0,0 +1,203 @@
++use super::*;
++use crate::client::endpoint::{
++    ClientEndpointId, ClientEndpointStatus, ProfileId, SavedSshEndpoint,
++};
++
++fn projection() -> ClientShellSnapshot {
++    let mut s = snapshot();
++    s.agents.push(ClientShellAgent {
++        pane_id: "pane_1".into(),
++        workspace_id: "ws_1".into(),
++        tab_id: "tab_1".into(),
++        name: None,
++        display_agent: None,
++        agent: Some("codex".into()),
++        title: None,
++        terminal_title: None,
++        terminal_title_stripped: None,
++        agent_status: AgentStatus::Idle,
++        state_change_seq: 0,
++        state_labels: vec![],
++        tokens: vec![],
++        focused: true,
++    });
++    s.commands.push(crate::protocol::ClientShellCommand {
++        command_id: "hopr-local".into(),
++        binding_label: "prefix+alt+m".into(),
++        binding_labels: vec!["prefix+alt+m".into()],
++        action: crate::protocol::ClientShellCommandAction::Popup,
++        description: Some("Move agent to another Mac".into()),
++    });
++    s
++}
++
++fn state(s: ClientShellSnapshot) -> ClientShellState {
++    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
++    state.set_snapshot(Box::new(s));
++    state.set_pane_surface(surface());
++    state
++}
++
++fn invoke(state: &mut ClientShellState) -> ClientShellInput {
++    let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref() else {
++        panic!("menu")
++    };
++    let index = menu
++        .items()
++        .iter()
++        .position(|item| item.action == ClientContextMenuAction::HoprMove)
++        .unwrap();
++    let mut outcome = ClientShellInput::default();
++    state.activate_context_menu_item(index, &mut outcome);
++    outcome
++}
++
++#[test]
++fn hopr_right_click_uses_clicked_workspace_agent_and_one_atomic_request() {
++    let mut s = projection();
++    s.focused_workspace_id = Some("another-workspace".into());
++    s.focused_pane_id = Some("another-pane".into());
++    let mut state = state(s);
++    state.compose(106, 30).unwrap();
++    let rect = state.hits.workspaces[0].rect;
++    let click = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
++        kind: MouseEventKind::Down(MouseButton::Right),
++        column: rect.x + 2,
++        row: rect.y,
++        modifiers: KeyModifiers::empty(),
++    })]);
++    assert!(click.actions.is_empty());
++    let outcome = invoke(&mut state);
++    let [ClientShellAction::Endpoint {
++        endpoint_id,
++        boot_id,
++        request,
++    }] = &outcome.actions[..]
++    else {
++        panic!("one request")
++    };
++    assert_eq!(endpoint_id, &ClientEndpointId::Local);
++    assert_eq!(boot_id, "boot-1");
++    let crate::api::schema::Method::CommandInvoke(params) = &request.method else {
++        panic!("command.invoke")
++    };
++    assert_eq!(params.command_id, "hopr-local");
++    assert_eq!(params.workspace_id.as_deref(), Some("ws_1"));
++    assert_eq!(params.pane_id.as_deref(), Some("pane_1"));
++    assert!(params.tab_id.is_none());
++    assert!(params.selection.is_none());
++    assert!(state.popup_pending);
++    assert!(state.cancel_endpoint_request(&request.id));
++    assert!(!state.popup_pending);
++}
++
++#[test]
++fn hopr_workspace_refuses_missing_or_ambiguous_agents_but_pane_is_exact() {
++    for count in [0, 2] {
++        let mut s = projection();
++        s.agents = vec![s.agents[0].clone(); count];
++        let mut state = state(s);
++        state.open_workspace_context_menu("ws_1".into(), 0, 0);
++        assert!(invoke(&mut state).actions.is_empty());
++        assert!(!state.popup_pending);
++        assert!(state
++            .endpoint_error
++            .as_deref()
++            .unwrap()
++            .contains("one agent"));
++        state.open_pane_context_menu("pane_1".into(), 0, 0);
++        assert_eq!(invoke(&mut state).actions.len(), 1);
++    }
++}
++
++#[test]
++fn hopr_requires_one_popup_binding_on_source_server() {
++    for variant in 0..3 {
++        let mut s = projection();
++        match variant {
++            0 => s.commands.clear(),
++            1 => s.commands.push(s.commands[0].clone()),
++            _ => s.commands[0].action = crate::protocol::ClientShellCommandAction::Shell,
++        }
++        let mut state = state(s);
++        state.open_workspace_context_menu("ws_1".into(), 0, 0);
++        assert!(invoke(&mut state).actions.is_empty());
++        assert!(!state.popup_pending);
++        assert!(state
++            .endpoint_error
++            .as_deref()
++            .unwrap()
++            .contains("exactly one Hopr popup"));
++    }
++}
++
++#[test]
++fn hopr_scopes_duplicate_pane_ids_to_machine_and_server_boot() {
++    let mut state = state(projection());
++    let profile = SavedSshEndpoint {
++        id: ProfileId::parse("0123456789abcdef0123456789abcdef").unwrap(),
++        label: "Home".into(),
++        target: "test@home".into(),
++        session: "default".into(),
++        enabled: true,
++    };
++    let remote = ClientEndpointId::Ssh(profile.id.clone());
++    state.set_endpoint_catalog(&[profile]);
++    state.set_endpoint_status(&remote, ClientEndpointStatus::Online);
++    let mut s = projection();
++    s.boot_id = "home-boot".into();
++    s.commands[0].command_id = "hopr-home".into();
++    state.set_endpoint_snapshot(&remote, Box::new(s));
++    state.open_workspace_context_menu("ws_1".into(), 0, 0);
++    let old_menu = state.overlay.take();
++    assert!(state.activate_endpoint_projection(&remote));
++    state.overlay = old_menu;
++    assert!(invoke(&mut state).actions.is_empty());
++    assert!(state
++        .endpoint_error
++        .as_deref()
++        .unwrap()
++        .contains("source machine changed"));
++
++    state.open_workspace_context_menu("ws_1".into(), 0, 0);
++    let outcome = invoke(&mut state);
++    let [ClientShellAction::Endpoint {
++        endpoint_id,
++        boot_id,
++        request,
++    }] = &outcome.actions[..]
++    else {
++        panic!("remote request")
++    };
++    assert_eq!(endpoint_id, &remote);
++    assert_eq!(boot_id, "home-boot");
++    let crate::api::schema::Method::CommandInvoke(params) = &request.method else {
++        panic!("command.invoke")
++    };
++    assert_eq!(params.command_id, "hopr-home");
++    state.cancel_endpoint_request(&request.id);
++
++    state.open_pane_context_menu("pane_1".into(), 0, 0);
++    state.snapshot.as_mut().unwrap().boot_id = "restarted".into();
++    assert!(invoke(&mut state).actions.is_empty());
++    assert!(!state.popup_pending);
++}
++
++#[test]
++fn hopr_disconnected_or_removed_source_cannot_launch() {
++    let mut state = state(projection());
++    state.open_workspace_context_menu("ws_1".into(), 0, 0);
++    state.snapshot.as_mut().unwrap().panes.clear();
++    assert!(invoke(&mut state).actions.is_empty());
++    assert!(state
++        .endpoint_error
++        .as_deref()
++        .unwrap()
++        .contains("pane disappeared"));
++
++    let mut state = self::state(projection());
++    state.open_pane_context_menu("pane_1".into(), 0, 0);
++    state.mark_endpoint_disconnected(&ClientEndpointId::Local);
++    assert!(invoke(&mut state).actions.is_empty());
++    assert!(!state.popup_pending);
++}
+diff --git a/src/client/shell/tests/mod.rs b/src/client/shell/tests/mod.rs
+index 497ce2c..7d802c7 100644
+--- a/src/client/shell/tests/mod.rs
++++ b/src/client/shell/tests/mod.rs
+@@ -213,6 +213,7 @@ mod chrome_context;
+ mod copy;
+ mod endpoint_requests;
+ mod endpoints;
++mod hopr;
+ #[path = "input.rs"]
+ mod input_domain;
+ mod keybindings_settings;

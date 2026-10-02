@@ -88,6 +88,39 @@ func TestHerdrMissingSessionRefRejected(t *testing.T) {
 	}
 }
 
+func TestHerdrManuallyStartedSource(t *testing.T) {
+	for _, state := range []string{"idle", "done", "working", "blocked", "unknown", "pending"} {
+		t.Run(state, func(t *testing.T) {
+			root := t.TempDir()
+			exe := filepath.Join(root, "codex")
+			write(t, exe, []byte("#!/bin/sh\nprintf 'codex-cli 0.160.0\\n'\n"))
+			must(t, os.Chmod(exe, 0755))
+			h, _ := apiFixture(t, func(method string, _ json.RawMessage) any {
+				switch method {
+				case "agent.get":
+					a := map[string]any{"pane_id": "w1:p1", "terminal_id": "terminal", "agent_status": state, "foreground_cwd": root, "agent_session": agentSession{Agent: "codex", Kind: "id", Value: testID, Source: "herdr:codex"}}
+					if state == "pending" {
+						a["agent_status"] = "idle"
+						a["launch_pending"] = true
+					}
+					// Real manual launches omit interactive_ready entirely.
+					return map[string]any{"type": "agent_info", "agent": a}
+				case "pane.process_info":
+					return map[string]any{"type": "pane_process_info", "process_info": map[string]any{"shell_pid": 1, "foreground_processes": []any{map[string]any{"pid": os.Getpid(), "argv": []string{"codex", "--no-daemon"}}}}}
+				default:
+					t.Errorf("unexpected method %s", method)
+					return nil
+				}
+			})
+			h.Config.Executables.Codex = exe
+			_, err := h.Inspect(context.Background(), "w1:p1", "named")
+			if (err == nil) != (state == "idle" || state == "done") {
+				t.Fatalf("state %s: %v", state, err)
+			}
+		})
+	}
+}
+
 func TestHerdrIntegrationReadiness(t *testing.T) {
 	for _, state := range []string{"current", "outdated", "not_installed", "missing", "unavailable"} {
 		t.Run(state, func(t *testing.T) {

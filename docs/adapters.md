@@ -29,9 +29,9 @@ SSH uses the receiver's own config at `~/.config/hopr/config.json`. Configure po
 
 Add [the popup binding](../examples/herdr.toml) to Herdr yourself. Select the agent pane, press `prefix+alt+m`, and choose a configured destination. The popup reads `HERDR_ACTIVE_PANE_ID`; `HERDR_SOCKET_PATH` must match a configured local server. An explicit `--server` selects a configured server. UI machine selection alone does not retarget hopr's local socket connection.
 
-**There is no right-click menu entry in this release.** Herdr 0.9.0's [context-menu implementation](https://github.com/herdrdev/herdr/blob/v0.9.0/src/client/shell/context_menu.rs) builds a fixed menu. Its plugin action `contexts` field does not add an entry there. A Herdr change would need to add the menu action, carry the clicked pane and owning server to a popup, and invoke hopr on that host. The documented popup binding works without a Herdr fork.
+The optional [custom Herdr client](../integrations/herdr/README.md) adds a right-click action for workspaces and panes. Stock Herdr 0.9.0 has a fixed context menu; plugin `contexts` do not extend it. The patch invokes exactly one configured Hopr popup using the existing `command.invoke` API, scoped to the clicked pane and server. Installing the Hopr binary alone does not modify Herdr. The shortcut works with stock Herdr.
 
-The built-in adapter requires protocol 22, a current official Codex/Claude integration, its exact `agent_session` UUID, interactive readiness and idle state, and one supported foreground process. It queries JSON APIs; it does not inspect screen text. Destination workspace labels are `hopr-<move-uuid>` for reconciliation. A socket incarnation and terminal identity guard against reused pane IDs.
+The built-in adapter requires protocol 22, a current official Codex/Claude integration, its exact `agent_session` UUID, idle/done state without a pending launch, and one supported foreground process. Manually started source agents do not have Herdr's managed `interactive_ready` flag; that flag is required on the destination, which Hopr starts using `agent.start`. It queries JSON APIs; it does not inspect screen text. Destination workspace labels are `hopr-<move-uuid>` for reconciliation. A socket incarnation and terminal identity guard against reused pane IDs.
 
 ## tmux
 
