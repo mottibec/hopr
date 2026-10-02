@@ -107,11 +107,19 @@ func Main(ctx context.Context, args []string, in io.Reader, out, errout io.Write
 		id := fs.String("id", "", "idempotency UUID")
 		agent := fs.String("agent", "", "native agent")
 		session := fs.String("session", "", "exact native session UUID")
+		plugin := fs.Bool("herdr-plugin", false, "use the plugin's captured source selection")
 		err = fs.Parse(rest[1:])
 		if err != nil {
 			err = fail("usage", "%v", err)
 		} else {
 			switch command {
+			case "herdr-popup":
+				var srv string
+				srv, err = c.Server(*server)
+				if err == nil {
+					err = (&Herdr{Config: c}).openPluginPopup(ctx, srv, configPath)
+					result = map[string]string{"popup": "requested"}
+				}
 			case "doctor":
 				result, err = e.Doctor(ctx, *to)
 			case "receive":
@@ -145,17 +153,29 @@ func Main(ctx context.Context, args []string, in io.Reader, out, errout io.Write
 						err = fail("usage", "menu is interactive; use move --json")
 						break
 					}
-					*pane = os.Getenv("HERDR_ACTIVE_PANE_ID")
-					if *pane == "" {
-						*pane = os.Getenv("TMUX_PANE")
-					}
-					if *pane == "" {
-						err = fail("usage", "menu requires HERDR_ACTIVE_PANE_ID or TMUX_PANE")
-						break
+					if *plugin {
+						*pane, err = (&Herdr{Config: c}).pluginMenuPane(ctx, srv)
+						if err != nil {
+							break
+						}
+					} else {
+						*pane = os.Getenv("HERDR_ACTIVE_PANE_ID")
+						if *pane == "" {
+							*pane = os.Getenv("TMUX_PANE")
+						}
+						if *pane == "" {
+							err = fail("usage", "menu requires HERDR_ACTIVE_PANE_ID or TMUX_PANE")
+							break
+						}
 					}
 					*to, err = menu(ctx, e, *pane, srv, in, out)
 					if err != nil {
 						break
+					}
+					if *plugin {
+						if _, err = (&Herdr{Config: c}).pluginMenuPane(ctx, srv); err != nil {
+							break
+						}
 					}
 				}
 				if *pane == "" {

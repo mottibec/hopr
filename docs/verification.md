@@ -13,7 +13,7 @@ go vet ./...
 make build
 ```
 
-The latest full Go suite passed in 26.860 seconds; the latest race run passed in 33.368 seconds. `go vet ./...` and the ARM64 build passed. Fixtures use real temporary Git repositories and real native JSONL import/export; agent lifecycle and Herdr readiness are controlled adapters or a fake Unix socket. Covered behaviors include:
+The latest full Go suite passed in 27.495 seconds; the latest race run passed in 30.112 seconds. `go vet ./...` and the ARM64 build passed. Fixtures use real temporary Git repositories and real native JSONL import/export; agent lifecycle and Herdr readiness are controlled adapters or a fake Unix socket. Covered behaviors include:
 
 - Codex and Claude handoffs, compatible return trips, divergent/destination-ahead history rejection, differing home and project paths.
 - Exact HEAD/unpushed history, staged versus unstaged text and binaries, deletion, untracked files, explicit ignored files, modes, internal symlinks, linked worktrees and detached HEAD.
@@ -21,8 +21,33 @@ The latest full Go suite passed in 26.860 seconds; the latest race run passed in
 - Faults before/after source preparation, stop, snapshot, retirement, copy, destination restore/import/workspace creation/launch/readiness. Ambiguous effects are not replayed.
 - Lost prepare/copy/advance responses, duplicate requests, repeated recovery, exclusive locks, missing native identity, unsupported versions/features, project-policy mismatch, unresolved writers and secret detection.
 - Herdr exact-UUID readiness and integration checks, SSH argv/stdin separation, command-adapter JSON, strict config, private setup creation and refusal to overwrite, default Claude credential-path preservation.
+- Standard Herdr plugin selection preservation across focus changes, missing context and changed server/socket/pane/workspace/terminal/session rejection.
 
 These are simulated lifecycle integrations. They do not prove a real native agent will resume an imported conversation or exit reliably under every terminal configuration.
+
+## Standard Herdr plugin
+
+`python3 plugins/herdr/smoke.py ~/.local/bin/herdr bin/hopr` passed against stock
+Herdr 0.9.0, using an isolated server, client PTY, plugin registry and Hopr config.
+It sent ordinary Ctrl+B then m bytes, invoked the real plugin action, verified
+the original pane/server/terminal context, and opened the real Hopr menu. The
+menu correctly rejected the fixture shell's missing agent. The retained fixture
+is `/private/tmp/hopr-popup-cuk7l7ar`. No real agent was stopped and no SSH transfer
+ran. This verifies terminal dispatch, not physical keyboard routing through the
+user's macOS global shortcuts.
+
+The plugin does not add native right-click entries. The optional custom-client
+verification below concerns a separate integration.
+
+The updated Hopr binary and locally linked plugin are installed on the work Mac.
+The only active Hopr binding is `prefix+m` → `hopr.move`; `server reload-config`
+returned `applied` with no diagnostics and the installed `doctor --json` passed.
+The installed binary matches `bin/hopr` (SHA-256
+`bb89687cbaa91002fcc57e5836fb6f442e65ca3138856f823a9033ad6395ddc4`).
+The previous binary and Herdr configuration were backed up with suffix
+`before-plugin-1790958441858852000` and
+`before-hopr-plugin-1790958441858852000`, respectively. The Air's binary was not
+updated in this plugin pass. No Herdr server was restarted or real session moved.
 
 ## Real SSH / Tailscale fixture
 

@@ -71,11 +71,19 @@ After snapshotting, hopr retires **only the selected source pane**, once it has 
 
 ## Herdr popup
 
-Add [examples/herdr.toml](examples/herdr.toml) yourself:
+The [standard Herdr plugin](plugins/herdr/README.md) packages Hopr as an action and
+popup for stock Herdr. Link it with `herdr plugin link "$PWD/plugins/herdr"`, then
+add [examples/herdr-plugin.toml](examples/herdr-plugin.toml) to your Herdr config
+and run `herdr server reload-config`. Select the agent pane, press **Ctrl+B**,
+release, then plain **m**, and choose the destination. This uses Herdr's default
+prefix; a customized prefix changes the first step.
+
+Alternatively, use the simple popup without installing the plugin. Add
+[examples/herdr.toml](examples/herdr.toml) yourself (choose one binding):
 
 ```toml
 [[keys.command]]
-key = "prefix+alt+m"
+key = "prefix+m"
 type = "popup"
 command = '"$HOME/.local/bin/hopr" menu'
 description = "Move agent to another Mac"
@@ -83,7 +91,10 @@ description = "Move agent to another Mac"
 
 `menu` reads `HERDR_ACTIVE_PANE_ID` for the underlying pane. It resolves `HERDR_SOCKET_PATH` only against configured servers. Unknown inherited sockets fail. `--server` overrides the source explicitly; pane IDs are scoped to that server. Selecting another machine in Herdr's UI does not retarget CLI commands. Run hopr on the host that owns the pane.
 
-The stock Herdr workflow is **select pane → shortcut → choose Mac**. For **right-click workspace → Move to another Mac → Home**, build the optional [custom Herdr client](integrations/herdr/README.md). Its patch uses the existing server API; it does not replace or restart your server. Installing Hopr alone does not change stock Herdr menus.
+The stock Herdr workflow is **select pane → shortcut → choose Mac**. Neither the
+plugin nor the simple popup adds right-click entries to stock Herdr. The optional
+[custom Herdr client](integrations/herdr/README.md) supplies that separate feature
+and needs its own maintenance; it is unnecessary for the plugin.
 
 Destinations can have an optional `label`, such as `"Home"`, in `hosts`. Labels are display-only; SSH aliases and verified host identities remain explicit. Menu results stay visible until Enter.
 
@@ -148,4 +159,4 @@ Compatible return-trip histories are compared as JSON records, preserving numeri
 | 5 | Uncertain outcome; status/recovery required |
 | 6 | Move not found |
 
-To uninstall, remove the installed `~/.local/bin/hopr` binary and any popup binding you added. Retain `~/.local/state/hopr` and `HoprWorkspaces` until all moves are resolved and you have backed up the desired work. Removing the binary does not delete checkouts or native conversations. Delete only explicitly chosen fixture/checkpoint directories later; do not delete an active checkout.
+To uninstall, remove the installed `~/.local/bin/hopr` binary and any popup binding you added. If installed, unlink/uninstall the [Herdr plugin](plugins/herdr/README.md#test-and-uninstall). Retain `~/.local/state/hopr` and `HoprWorkspaces` until all moves are resolved and you have backed up the desired work. Removing the binary does not delete checkouts or native conversations. Delete only explicitly chosen fixture/checkpoint directories later; do not delete an active checkout.

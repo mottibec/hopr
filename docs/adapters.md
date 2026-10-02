@@ -27,7 +27,7 @@ SSH uses the receiver's own config at `~/.config/hopr/config.json`. Configure po
 
 ## Herdr
 
-Add [the popup binding](../examples/herdr.toml) to Herdr yourself. Select the agent pane, press `prefix+alt+m`, and choose a configured destination. The popup reads `HERDR_ACTIVE_PANE_ID`; `HERDR_SOCKET_PATH` must match a configured local server. An explicit `--server` selects a configured server. UI machine selection alone does not retarget hopr's local socket connection.
+Use the [standard plugin](../plugins/herdr/README.md), or add [the simple popup binding](../examples/herdr.toml) yourself. Select the agent pane, press `prefix+m` (default: Ctrl+B, release, then plain m), and choose a configured destination. The simple popup reads `HERDR_ACTIVE_PANE_ID`; the plugin captures the action's pane, workspace, terminal, session reference and server incarnation before opening its popup and revalidates them before moving. Both require `HERDR_SOCKET_PATH` to match a configured local server. An explicit `--server` selects a configured server for CLI use; the plugin refuses mismatched inherited sockets. UI machine selection alone does not retarget hopr's local socket connection.
 
 The optional [custom Herdr client](../integrations/herdr/README.md) adds a right-click action for workspaces and panes. Stock Herdr 0.9.0 has a fixed context menu; plugin `contexts` do not extend it. The patch invokes exactly one configured Hopr popup using the existing `command.invoke` API, scoped to the clicked pane and server. Installing the Hopr binary alone does not modify Herdr. The shortcut works with stock Herdr.
 

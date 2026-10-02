@@ -16,6 +16,8 @@ Hopr uses newline-delimited JSON requests over a configured local Unix socket: `
 | `pane.process_info` | `pane_id`; result `process_info.shell_pid`, `foreground_processes[].pid/name/argv/cwd` |
 | `pane.send_keys` | `pane_id`, `keys` |
 | `pane.list` | Optional `workspace_id`; result `panes` |
+| `pane.get` | `pane_id`; result `pane` with `pane_id`, `workspace_id`, `terminal_id`, optional `agent_session` |
+| `plugin.pane.open` | `plugin_id`, `entrypoint`, `placement: popup`, string-map `env` |
 | `pane.close` | `pane_id` for the stopped source only |
 | `workspace.list` | Result `workspaces[].workspace_id/label` |
 | `workspace.create` | `cwd`, `label`, `env`, `focus`; result `root_pane` |
@@ -23,7 +25,14 @@ Hopr uses newline-delimited JSON requests over a configured local Unix socket: `
 
 `agent_session` must have `source: herdr:codex` or `herdr:claude`, matching `agent`, `kind: id`, and the exact UUID. Missing integration identity is unsupported. A pane ID alone is never treated as global.
 
-Herdr's experimental live handoff replaces a server on the **same host**. Hopr implements a separate application handoff across hosts. Herdr's right-click menu is fixed in the inspected 0.9.0 source; plugin action context metadata does not extend it. The supplied shortcut is a documented custom-command popup. An optional [client patch](../integrations/herdr/README.md) adds the right-click action using existing `command.invoke` parameters `command_id`, `workspace_id`, `tab_id`, `pane_id`, and `selection`, without changing the wire schema.
+Herdr's experimental live handoff replaces a server on the **same host**. Hopr implements a separate application handoff across hosts. Herdr's right-click menu is fixed in the inspected 0.9.0 source; plugin action context metadata does not extend it. The supplied shortcut supports a [standard plugin action](../plugins/herdr/README.md) or a simple custom-command popup. An optional [client patch](../integrations/herdr/README.md) adds the right-click action using existing `command.invoke` parameters `command_id`, `workspace_id`, `tab_id`, `pane_id`, and `selection`, without changing the wire schema.
+
+The plugin reads `HERDR_PLUGIN_CONTEXT_JSON.focused_pane_id` and `workspace_id`
+from the action invocation. Herdr 0.9.0 builds popup context from current focus,
+so Hopr separately captures the original selection and passes it through the
+documented popup `env` map. The popup checks `HERDR_PLUGIN_ID`,
+`HERDR_PLUGIN_ENTRYPOINT_ID`, `HERDR_SOCKET_PATH` and the captured identities.
+The manifest uses argv commands and has no startup/event hooks or build commands.
 
 ## Native agents
 

@@ -4,6 +4,10 @@ This optional **custom Herdr client** adds **Move to another Mac...** to workspa
 rows in the machines sidebar and to pane context menus. Hopr remains independent
 of Herdr; stock Herdr can use the same popup through its keyboard shortcut.
 
+For the standard action and popup without maintaining a custom client, use the
+[Hopr Herdr plugin](../../plugins/herdr/README.md). The patch below expects the
+simple `type = "popup"` binding; a `plugin_action` binding does not enable its menu.
+
 Flow: select **Local**, right-click the project/session row, choose **Move to
 another Mac...**, then choose **Home** in the Hopr popup. It checks the destination,
 stops the exact idle agent, transfers its conversation and Git state over SSH, and
